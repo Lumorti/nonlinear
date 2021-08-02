@@ -1,4 +1,4 @@
-CXX=mpic++
+CXX=g++
 CXXFLAGS=-Wfatal-errors -O3
 LIBS=-I/usr/include/eigen3
 

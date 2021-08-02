@@ -26,6 +26,7 @@ int numOutcomeB = 0;
 int numUniquePer = 0;
 int numRealPer = 0;
 std::vector<Eigen::MatrixXd> As;
+Eigen::MatrixXd B;
 
 // Sizes of matrices
 int n = 0;
@@ -156,7 +157,7 @@ void prettyPrint(std::string pre, Eigen::SparseMatrix<type> arr) {
 }
 
 // Get the smallest eigenvalue of a matrix
-double smallestEigenvalue(Eigen::MatrixXd A){
+double smallestEigenvalue(Eigen::MatrixXd A) {
 
 	// Start with a random unit vector
 	Eigen::VectorXd w = Eigen::VectorXd::Random(A.cols());
@@ -167,7 +168,7 @@ double smallestEigenvalue(Eigen::MatrixXd A){
 
 	// Iteratively solve Aw = v, 
 	double eigenval = 1.0 / w.norm();
-	for (int i=0; i<10; i++){
+	for (int i=0; i<10; i++) {
 		w = AInv * v;
 		eigenval = 1.0 / w.norm();
 		v = w.normalized();
@@ -273,8 +274,11 @@ Eigen::VectorXd delF(Eigen::VectorXd x) {
 					}
 
 					// For each component, add to that section of the differentiation
-					for (int a=0; a<numRealPer; a++) {
-						vals(startLoc1+a) -= x(startLoc1+a) / (2.0 * std::sqrt(1.0 - realComp + imagComp));
+					for (int a=0; a<numRealPer; a+=2) {
+						vals(startLoc1+a)   -= x(startLoc2+a)   / (2.0 * std::sqrt(1.0 - realComp + imagComp));
+						vals(startLoc2+a)   -= x(startLoc1+a)   / (2.0 * std::sqrt(1.0 - realComp + imagComp));
+						vals(startLoc1+a+1) += x(startLoc2+a+1) / (2.0 * std::sqrt(1.0 - realComp + imagComp));
+						vals(startLoc2+a+1) += x(startLoc1+a+1) / (2.0 * std::sqrt(1.0 - realComp + imagComp));
 					}
 
 				}
@@ -340,9 +344,87 @@ Eigen::VectorXd delL(Eigen::VectorXd x, Eigen::VectorXd y, Eigen::MatrixXd Z) {
 
 }
 
-// Differential of the Lagrangian given an interior point
-Eigen::VectorXd delL(interiorPoint w) {
-	return delL(w.x, w.y, w.Z);
+// Double differential of the objective function
+Eigen::MatrixXd del2F(Eigen::VectorXd x) {
+
+	// Create an n by n matrix of all zeros
+	Eigen::MatrixXd vals = Eigen::MatrixXd::Zero(n, n);
+
+	// Off-diagonal elements should be doubled since it's symmetric
+	std::vector<double> factors(numRealPer, 2.0);
+	int ind = 0;
+	int ref = 0;
+	int diff = d;
+	while (ind < numRealPer) {
+		factors[ind] = 1.0;
+		factors[ind+1] = 1.0;
+		ind += 2*diff;
+		diff--;
+	}
+
+	// For each pair of measurements
+	for (int i=0; i<numMeasureB; i++) {
+		for (int j=i+1; j<numMeasureB; j++) {
+	
+			// For each outcome of these measurements
+			for (int k=0; k<numOutcomeB; k++) {
+				for (int l=0; l<numOutcomeB; l++) {
+
+					// Where in the vector the matrices start
+					int startLoc1 = (i*numOutcomeB + k) * numRealPer;
+					int startLoc2 = (j*numOutcomeB + l) * numRealPer;
+
+					// Get the real component
+					double realComp = 0.0;
+					double imagComp = 0.0;
+					double realTop = 0.0;
+					double imagTop = 0.0;
+					for (int a=0; a<numRealPer; a+=2) {
+						realComp += factors[a] * x(startLoc1+a)   * x(startLoc2+a);
+						imagComp += factors[a] * x(startLoc1+a+1) * x(startLoc2+a+1);
+						realTop += factors[a] * x(startLoc2+a);
+						imagTop += factors[a] * x(startLoc2+a+1);
+					}
+
+					// For each component, add to that section of the differentiation
+					for (int a=0; a<numRealPer; a++) {
+						for (int b=0; b<numRealPer; b++) {
+
+							// The coefficient has nothing to do with the differential
+							vals(startLoc1+a, startLoc1+b) -= (x(startLoc2+a) * x(startLoc2+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
+							vals(startLoc2+a, startLoc2+b) -= (x(startLoc1+a) * x(startLoc1+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
+
+							// The coefficient is the differential, so need to use product rule
+							if (a == b) {
+								vals(startLoc1+a, startLoc2+b) -= 1 / (2.0 * std::sqrt(1.0 - realComp + imagComp)) + (x(startLoc2+a) * x(startLoc1+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
+								vals(startLoc2+a, startLoc1+b) -= 1 / (2.0 * std::sqrt(1.0 - realComp + imagComp)) + (x(startLoc1+a) * x(startLoc2+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
+
+							// The coefficient has nothing to do with the differential
+							} else {
+								vals(startLoc1+a, startLoc2+b) -= (x(startLoc2+a) * x(startLoc1+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
+								vals(startLoc2+a, startLoc1+b) -= (x(startLoc1+a) * x(startLoc2+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
+							}
+
+						}
+					}
+
+				}
+			}
+
+		}
+	}
+
+	// Return the matrix
+	return vals;
+
+}
+
+// Double differential of the Lagrangian given an interior point
+Eigen::MatrixXd del2L(interiorPoint w) {
+
+	// In our case it's only the f(x) that has a non-zero value
+	return del2F(w.x);
+
 }
 
 // Constraint function
@@ -395,10 +477,13 @@ Eigen::MatrixXd X(Eigen::VectorXd x) {
 	// Cached quantities
 	int halfP = p / 2;
 
-	// For each vector element
+	// For each vector element, multiply by the corresponding A
 	for (int i=0; i<n; i++) {
 		newX += As[i] * x(i);
 	}
+
+	// Add the B
+	newX += B;
 	
 	// Return this new matrix
 	return newX;
@@ -411,7 +496,7 @@ double rMag(interiorPoint w, double mu) {
 	// Calculate various vectors
 	Eigen::MatrixXd XCached = X(w.x);
 	Eigen::VectorXd gCached = g(w.x);
-	Eigen::VectorXd delLCached = delL(w);
+	Eigen::VectorXd delLCached = delL(w.x, w.y, w.Z);
 
 	// Combined g and delL for the left part of the square root
 	Eigen::VectorXd combined(gCached.size() + delLCached.size());
@@ -426,6 +511,11 @@ double rMag(interiorPoint w, double mu) {
 	// Return this magnitude
 	return val;
 
+}
+
+// Handy functions for comparing the dimensions of two matrices
+void dimCompare(Eigen::MatrixXd a, Eigen::MatrixXd b) {
+	std::cout << "left dims = " << a.rows() << " x " << a.cols() << "   right dims = " << b.rows() << " x " << b.cols() << std::endl;
 }
 
 // Standard cpp entry point
@@ -507,6 +597,9 @@ int main(int argc, char ** argv) {
 
 	}
 
+	// Calculate the B matrix used to make sure X is invertible
+	B = Eigen::MatrixXd::Identity(p,p) / d;
+
 	// The interior point to optimise
 	interiorPoint w(n, m, p);
 
@@ -517,17 +610,49 @@ int main(int argc, char ** argv) {
 		   0.5, 0.0,   -0.5, 0.0,     0.5, 0.0;
 	//w.x << 1.0, 0.0,    0.0, 0.0,     0.0, 0.0,
 		   //0.0, 0.0,    0.0, 0.0,     1.0, 0.0,
+		   //0.6, 0.0,    0.5, 0.0,     0.4, 0.0,
+		   //0.4, 0.0,   -0.5, 0.0,     0.6, 0.0;
+	//w.x << 1.0, 0.0,    0.0, 0.0,     0.0, 0.0,
+		   //0.0, 0.0,    0.0, 0.0,     1.0, 0.0,
 		   //1.0, 0.0,    0.0, 0.0,     0.0, 0.0,
 		   //0.0, 0.0,    0.0, 0.0,     1.0, 0.0;
 
 	// Initialise Z
 	w.Z = Eigen::MatrixXd::Identity(p, p);
 
-	// Calculate the initial G, the Hessian of L(w) TODO
+	// Calculate the initial G, the Hessian of L(w)
 	Eigen::MatrixXd G = del2L(w);
 
-	// Ensure G is positive semidefinite TODO
-	Eigen::MatrixXd cholDecomp = G.ldlt();
+	// See if G isn't PSD
+	if (G.ldlt().info() != Eigen::ComputationInfo::Success) {
+
+		// If G-sigma*I is PSD
+		double sigma = 1;
+		Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
+		if ((G-sigma*I).ldlt().info() == Eigen::ComputationInfo::Success) {
+
+			// Decrease sigma until it isn't
+			while ((G-sigma*I).ldlt().info() == Eigen::ComputationInfo::Success) {
+				sigma /= 2;
+			}
+
+			// Then return to the one that was still PSD
+			sigma *= 2;
+
+		// If G-sigma*I is not PSD
+	 	} else {
+
+			// Increase sigma until it is
+			while ((G-sigma*I).ldlt().info() != Eigen::ComputationInfo::Success) {
+				sigma *= 2;
+			}
+
+		}
+
+		// Update this new G
+		G = G-sigma*I;
+
+	}
 			
 	// Outer loop
 	int maxIter = 3;
@@ -555,37 +680,52 @@ int main(int argc, char ** argv) {
 
 			// Cache things
 			Eigen::MatrixXd XCached = X(w.x);
+			Eigen::MatrixXd XInverse = XCached.inverse();
+			Eigen::MatrixXd A_0 = delG(w.x);
+			Eigen::VectorXd delLCached = delL(w.x, w.y, w.Z);
 
 			// Calculate T, the scaling matrix
 			Eigen::MatrixXd T = XCached.pow(-0.5);
 
 			// Update G
-			Eigen::VectorXd q = delL(w) - delL(prevX, w.y, w.Z);
+			Eigen::VectorXd q = delLCached - delL(prevx, w.y, w.Z);
 			Eigen::VectorXd s = w.x - prevx;
-			Eigen::VectorXd sTran = s.transpose();
+			Eigen::MatrixXd sTran = s.transpose();
 			double psi = 1;
-			if (sTran*q < 0.2*sTran*(G*s)){
-				psi = (0.8*sTran*(G*s)) / (sTran(G*s-q));
+			if (s.dot(q) < 0.2*s.dot(G*s)) {
+				psi = (0.8*s.dot(G*s)) / (s.dot(G*s-q));
 			}
 			Eigen::VectorXd qBar = psi*q + (1-psi)*(G*s);
-			G += -((G*(s*(sTran*G))) / (sTran*(G*s))) + ((qBar*qBar.transpose()) / (sTran*qBar));
-			
-			// Calculate direction TODO
+			G += -((G*(s*(sTran*G))) / (s.dot(G*s))) + ((qBar*qBar.transpose()) / (s.dot(qBar)));
+	std::cout << "here8" << std::endl;
+
+			// Calculate direction
 			interiorPoint delta(n, m, p);
+			delta.x = -g(w.x)*A_0.inverse(); // TODO A_0 is not invertable
+	std::cout << "here8.1" << std::endl;
+			Eigen::MatrixXd DeltaX = X(delta.x);
+	std::cout << "here8.2" << std::endl;
+			delta.Z = mu*XInverse - w.Z - (XInverse*(DeltaX*w.Z) + w.Z*(DeltaX*XInverse)) / 2.0;
+	std::cout << "here8.3" << std::endl;
+			Eigen::VectorXd AStarDeltaZ = Eigen::VectorXd::Zero(n);
+			for (int i=0; i<n; i++) {
+				AStarDeltaZ(i) = As[i].cwiseProduct(delta.Z).sum();
+			}
+	std::cout << "here8.4" << std::endl;
+			delta.y = A_0.transpose().inverse() * (G*delta.x - AStarDeltaZ + delLCached);
+
+	std::cout << "here9" << std::endl;
 
 			// Calculate optimal step size using a line search TODO
 			double alphaBarX = 1.0;
 			double alphaBarZ = 1.0;
-			if (XCached.determinant() != 0.0){
-				alphaBarX = -gamma / smallestEigenvalue(XCached.inverse() * X(delta.x));
-			}
-			Eigen::MatrixXd eigenZ = w.Z.inverse() * delta.Z;
-			if (eigenZ.determinant() != 0.0){
-				alphaBarZ = -gamma / smallestEigenvalue(eigenZ);
-			}
+			alphaBarX = -gamma / smallestEigenvalue(XInverse * X(delta.x));
+			alphaBarZ = -gamma / smallestEigenvalue(w.Z.inverse() * delta.Z);
 			double alphaBar = std::min(std::min(alphaBarX, alphaBarZ), 1.0);
 			int l = 2;
 			double alpha = alphaBar * std::pow(beta, l);
+
+	std::cout << "here10" << std::endl;
 
 			// Update variables
 			prevx = w.x;
