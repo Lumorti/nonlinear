@@ -25,6 +25,8 @@ int numMeasureB = 0;
 int numOutcomeB = 0;
 int numUniquePer = 0;
 int numRealPer = 0;
+int numImagPer = 0;
+int numTotalPer = 0;
 std::vector<Eigen::MatrixXd> As;
 Eigen::MatrixXd B;
 
@@ -179,46 +181,52 @@ double smallestEigenvalue(Eigen::MatrixXd A) {
 
 }
 
-// Objective function
+// Function turning x to X
+Eigen::MatrixXd X(Eigen::VectorXd x, double extra=0.01) {
+
+	// Create a blank p by p matrix
+	Eigen::MatrixXd newX = Eigen::MatrixXd::Zero(p, p);
+
+	// For each vector element, multiply by the corresponding A
+	for (int i=0; i<n; i++) {
+		newX += As[i] * x(i);
+	}
+
+	// Add the B
+	newX += B;
+
+	// Add a bit extra to make it reversible
+	newX += Eigen::MatrixXd::Identity(p, p) * extra;
+	
+	// Return this new matrix
+	return newX;
+
+}
+
+// Objective function TODO new format
 double f(Eigen::VectorXd x) {
 
 	// Init the return val
 	double val = 0.0;
 
-	// Off-diagonal elements should be doubled since it's symmetric
-	std::vector<double> factors(numRealPer, 2.0);
-	int ind = 0;
-	int ref = 0;
-	int diff = d;
-	while (ind < numRealPer) {
-		factors[ind] = 1.0;
-		factors[ind+1] = 1.0;
-		ind += 2*diff;
-		diff--;
-	}
+	// Cache the full matrix
+	Eigen::MatrixXd XCached = X(x, 0.0);
+	int halfP = p / 2;
 
 	// For each pair of measurements
 	for (int i=0; i<numMeasureB; i++) {
 		for (int j=i+1; j<numMeasureB; j++) {
 	
 			// For each outcome of these measurements
-			for (int k=0; k<numOutcomeB; k++) {
-				for (int l=0; l<numOutcomeB; l++) {
+			for (int k=0; k<numOutcomeB+1; k++) {
+				for (int l=0; l<numOutcomeB+1; l++) {
 
-					// Where in the vector the matrices start
-					int startLoc1 = (i*numOutcomeB + k) * numRealPer;
-					int startLoc2 = (j*numOutcomeB + l) * numRealPer;
+					// Start locations of the real and imag submatrices
+					int r1 = (i * (numOutcomeB+1) + k) * d;
+					int r2 = (j * (numOutcomeB+1) + l) * d;
 
-					// Get the real component
-					double realComp = 0.0;
-					double imagComp = 0.0;
-					for (int a=0; a<numRealPer; a+=2) {
-						realComp += factors[a] * x(startLoc1+a)   * x(startLoc2+a);
-						imagComp += factors[a] * x(startLoc1+a+1) * x(startLoc2+a+1);
-					}
-
-					// Add this inner product
-					val += std::sqrt(1.0 - realComp + imagComp);
+					// Add this inner product of the submatrices
+					val += std::sqrt(1.0 - XCached.block(r1, r1, d, d).cwiseProduct(XCached.block(r2, r2, d, d)).sum() + XCached.block(r1, r1+halfP, d, d).cwiseProduct(XCached.block(r2+halfP, r2, d, d)).sum());
 
 				}
 			}
@@ -232,59 +240,43 @@ double f(Eigen::VectorXd x) {
 }
 
 // Gradient of the objective function
-Eigen::VectorXd delF(Eigen::VectorXd x) {
+Eigen::VectorXd delf(Eigen::VectorXd x) {
 
 	// Init the return val
 	Eigen::VectorXd vals = Eigen::VectorXd::Zero(n);
 
-	// Off-diagonal elements should be doubled since it's symmetric
-	std::vector<double> factors(numRealPer, 2.0);
-	int ind = 0;
-	int ref = 0;
-	int diff = d;
-	while (ind < numRealPer) {
-		factors[ind] = 1.0;
-		factors[ind+1] = 1.0;
-		ind += 2*diff;
-		diff--;
-	}
+	// Cache the full matrix
+	Eigen::MatrixXd XCached = X(x, 0.0);
+	int halfP = p / 2;
 
-	// For each pair of measurements
-	for (int i=0; i<numMeasureB; i++) {
-		for (int j=i+1; j<numMeasureB; j++) {
-	
-			// For each outcome of these measurements
-			for (int k=0; k<numOutcomeB; k++) {
-				for (int l=0; l<numOutcomeB; l++) {
+	// For each component of the vector
+	for (int a=0; a<n; a++) {
 
-					// Where in the vector the matrices start
-					int startLoc1 = (i*numOutcomeB + k) * numRealPer;
-					int startLoc2 = (j*numOutcomeB + l) * numRealPer;
+		// For each pair of measurements
+		for (int i=0; i<numMeasureB; i++) {
+			for (int j=i+1; j<numMeasureB; j++) {
+		
+				// For each outcome of these measurements
+				for (int k=0; k<numOutcomeB; k++) {
+					for (int l=0; l<numOutcomeB; l++) {
 
-					// Get the real component
-					double realComp = 0.0;
-					double imagComp = 0.0;
-					double realTop = 0.0;
-					double imagTop = 0.0;
-					for (int a=0; a<numRealPer; a+=2) {
-						realComp += factors[a] * x(startLoc1+a)   * x(startLoc2+a);
-						imagComp += factors[a] * x(startLoc1+a+1) * x(startLoc2+a+1);
-						realTop += factors[a] * x(startLoc2+a);
-						imagTop += factors[a] * x(startLoc2+a+1);
+						// Only if this a is part of this measurement TODO
+
+						// Start locations of the real and imag submatrices
+						int r1 = (i * (numOutcomeB+1) + k) * d;
+						int r2 = (j * (numOutcomeB+1) + l) * d;
+
+						// If it's imaginary TODO
+
+						// Add this inner product of the submatrices
+						vals(a) -= As[a].block(r1,r1,d,d).cwiseProduct(XCached.block(r2,r2,d,d)).sum() / (2 * std::sqrt(1.0 - XCached.block(r1,r1,d,d).cwiseProduct(XCached.block(r2,r2,d,d)).sum() + XCached.block(r1,r1+halfP,d,d).cwiseProduct(XCached.block(r2+halfP,r2,d,d)).sum()));
+
 					}
-
-					// For each component, add to that section of the differentiation
-					for (int a=0; a<numRealPer; a+=2) {
-						vals(startLoc1+a)   -= x(startLoc2+a)   / (2.0 * std::sqrt(1.0 - realComp + imagComp));
-						vals(startLoc2+a)   -= x(startLoc1+a)   / (2.0 * std::sqrt(1.0 - realComp + imagComp));
-						vals(startLoc1+a+1) += x(startLoc2+a+1) / (2.0 * std::sqrt(1.0 - realComp + imagComp));
-						vals(startLoc2+a+1) += x(startLoc1+a+1) / (2.0 * std::sqrt(1.0 - realComp + imagComp));
-					}
-
 				}
-			}
 
+			}
 		}
+
 	}
 
 	// Return the function value
@@ -292,117 +284,44 @@ Eigen::VectorXd delF(Eigen::VectorXd x) {
 
 }
 
-// Gradient of the constraint function
-Eigen::MatrixXd delG(Eigen::VectorXd x) {
-
-	// Matrix representing the Jacobian of g
-	Eigen::MatrixXd gOutput = Eigen::MatrixXd::Zero(m, n);
-
-	// For each measurement
-	for (int i=0; i<numMeasureB; i++) {
-	
-		// For each position
-		for (int a=0; a<numRealPer; a++) {
-
-			// For each outcome of this measurement
-			for (int k=0; k<numOutcomeB; k++) {
-				int vecLoc = (i*numOutcomeB + k) * numRealPer;
-				gOutput(i*numRealPer + a, vecLoc + a) = 1;
-			}
-
-		}
-
-	}
-
-	// Return the gradient vector of g
-	return gOutput;
-
-}
-
-// Differential of the Lagrangian given individual components
-Eigen::VectorXd delL(Eigen::VectorXd x, Eigen::VectorXd y, Eigen::MatrixXd Z) {
-
-	// Start with a vector of n elements
-	Eigen::VectorXd vals = Eigen::VectorXd::Zero(n);
-
-	// Get the gradient of f(x)
-	Eigen::VectorXd delFCached = delF(x);
-
-	// Get A_0
-	Eigen::MatrixXd A_0 = delG(x);
-
-	// Calculate the first part as in the paper
-	vals = delFCached - A_0.transpose() * y;
-
-	// Then the second 
-	for (int i=0; i<n; i++) {
-		vals(i) -= As[i].cwiseProduct(Z).sum();
-	}
-
-	// Return this vector
-	return vals;
-
-}
-
-// Double differential of the objective function
-Eigen::MatrixXd del2F(Eigen::VectorXd x) {
+// Double differential of the objective function TODO
+Eigen::MatrixXd del2f(Eigen::VectorXd x) {
 
 	// Create an n by n matrix of all zeros
 	Eigen::MatrixXd vals = Eigen::MatrixXd::Zero(n, n);
 
-	// Off-diagonal elements should be doubled since it's symmetric
-	std::vector<double> factors(numRealPer, 2.0);
-	int ind = 0;
-	int ref = 0;
-	int diff = d;
-	while (ind < numRealPer) {
-		factors[ind] = 1.0;
-		factors[ind+1] = 1.0;
-		ind += 2*diff;
-		diff--;
-	}
+	// Cache the full matrix
+	Eigen::MatrixXd XCached = X(x, 0.0);
+	int halfP = p / 2;
 
-	// For each pair of measurements
-	for (int i=0; i<numMeasureB; i++) {
-		for (int j=i+1; j<numMeasureB; j++) {
-	
-			// For each outcome of these measurements
-			for (int k=0; k<numOutcomeB; k++) {
-				for (int l=0; l<numOutcomeB; l++) {
+	// For each component of the vector
+	for (int a=0; a<n; a++) {
+		for (int b=0; b<n; b++) {
 
-					// Where in the vector the matrices start
-					int startLoc1 = (i*numOutcomeB + k) * numRealPer;
-					int startLoc2 = (j*numOutcomeB + l) * numRealPer;
+			// For each pair of measurements
+			for (int i=0; i<numMeasureB; i++) {
+				for (int j=i+1; j<numMeasureB; j++) {
+			
+					// For each outcome of these measurements
+					for (int k=0; k<numOutcomeB; k++) {
+						for (int l=0; l<numOutcomeB; l++) {
 
-					// Get the real component
-					double realComp = 0.0;
-					double imagComp = 0.0;
-					double realTop = 0.0;
-					double imagTop = 0.0;
-					for (int a=0; a<numRealPer; a+=2) {
-						realComp += factors[a] * x(startLoc1+a)   * x(startLoc2+a);
-						imagComp += factors[a] * x(startLoc1+a+1) * x(startLoc2+a+1);
-						realTop += factors[a] * x(startLoc2+a);
-						imagTop += factors[a] * x(startLoc2+a+1);
-					}
+							// Start locations of the real and imag submatrices
+							int r1 = (i * (numOutcomeB+1) + k) * d;
+							int r2 = (j * (numOutcomeB+1) + l) * d;
 
-					// For each component, add to that section of the differentiation
-					for (int a=0; a<numRealPer; a++) {
-						for (int b=0; b<numRealPer; b++) {
+							// Needs a definition so it has properly assigned memory for .block
+							Eigen::MatrixXd xAa = x(a)*As[a];
+							Eigen::MatrixXd xAb = x(b)*As[b];
 
-							// The coefficient has nothing to do with the differential
-							vals(startLoc1+a, startLoc1+b) -= (x(startLoc2+a) * x(startLoc2+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
-							vals(startLoc2+a, startLoc2+b) -= (x(startLoc1+a) * x(startLoc1+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
-
-							// The coefficient is the differential, so need to use product rule
 							if (a == b) {
-								vals(startLoc1+a, startLoc2+b) -= 1 / (2.0 * std::sqrt(1.0 - realComp + imagComp)) + (x(startLoc2+a) * x(startLoc1+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
-								vals(startLoc2+a, startLoc1+b) -= 1 / (2.0 * std::sqrt(1.0 - realComp + imagComp)) + (x(startLoc1+a) * x(startLoc2+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
 
-							// The coefficient has nothing to do with the differential
+
 							} else {
-								vals(startLoc1+a, startLoc2+b) -= (x(startLoc2+a) * x(startLoc1+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
-								vals(startLoc2+a, startLoc1+b) -= (x(startLoc1+a) * x(startLoc2+b)) / (4.0 * std::pow(1.0 - realComp + imagComp, 1.5));
+
+								// Add this inner product of the submatrices
+								vals(a, b) -= xAb.block(r1,r1,d,d).cwiseProduct(xAa.block(r1,r1,d,d)).cwiseProduct(XCached.block(r2,r2,d,d)).sum() / (4 * std::pow(1.0 - XCached.block(r1,r1,d,d).cwiseProduct(XCached.block(r2,r2,d,d)).sum() + XCached.block(r1,r1+halfP,d,d).cwiseProduct(XCached.block(r2+halfP,r2,d,d)).sum()), 1.5);
+
 							}
 
 						}
@@ -419,11 +338,47 @@ Eigen::MatrixXd del2F(Eigen::VectorXd x) {
 
 }
 
+// Gradient of the constraint function
+Eigen::MatrixXd delG(Eigen::VectorXd x) {
+
+	// Matrix representing the Jacobian of g
+	Eigen::MatrixXd gOutput = Eigen::MatrixXd::Zero(m, n);
+
+	// Return the gradient vector of g
+	return gOutput;
+
+}
+
+// Differential of the Lagrangian given individual components
+Eigen::VectorXd delL(Eigen::VectorXd x, Eigen::VectorXd y, Eigen::MatrixXd Z) {
+
+	// Start with a vector of n elements
+	Eigen::VectorXd vals = Eigen::VectorXd::Zero(n);
+
+	// Get the gradient of f(x)
+	Eigen::VectorXd delfCached = delf(x);
+
+	// Get A_0
+	Eigen::MatrixXd A_0 = delG(x);
+
+	// Calculate the first part as in the paper
+	vals = delfCached - A_0.transpose() * y;
+
+	// Then the second 
+	for (int i=0; i<n; i++) {
+		vals(i) -= As[i].cwiseProduct(Z).sum();
+	}
+
+	// Return this vector
+	return vals;
+
+}
+
 // Double differential of the Lagrangian given an interior point
 Eigen::MatrixXd del2L(interiorPoint w) {
 
 	// In our case it's only the f(x) that has a non-zero value
-	return del2F(w.x);
+	return del2f(w.x);
 
 }
 
@@ -433,60 +388,8 @@ Eigen::VectorXd g(Eigen::VectorXd x) {
 	// Vector to create
 	Eigen::VectorXd gOutput = Eigen::VectorXd::Zero(m);
 
-	// The values the elements in x should sum to
-	std::vector<double> ideal(numRealPer, 0.0);
-	int ind = 0;
-	int ref = 0;
-	int diff = d;
-	while (ind < numRealPer) {
-		ideal[ind] = 1.0;
-		ind += 2*diff;
-		diff--;
-	}
-
-	// For each measurement
-	for (int i=0; i<numMeasureB; i++) {
-	
-		// For each position
-		for (int a=0; a<numRealPer; a++) {
-
-			// For each outcome of this measurement
-			for (int k=0; k<numOutcomeB; k++) {
-				int vecLoc = (i*numOutcomeB + k) * numRealPer;
-				gOutput(i*numRealPer + a) += x(vecLoc + a);
-			}
-
-			// Take away the ideal (thus should be zero here)
-			gOutput(i*numRealPer + a) -= ideal[a];
-
-		}
-
-	}
-
 	// Return this vector of things that should be zero
 	return gOutput;
-
-}
-
-// Function turning x to X
-Eigen::MatrixXd X(Eigen::VectorXd x) {
-
-	// Create a blank p by p matrix
-	Eigen::MatrixXd newX = Eigen::MatrixXd::Zero(p, p);
-
-	// Cached quantities
-	int halfP = p / 2;
-
-	// For each vector element, multiply by the corresponding A
-	for (int i=0; i<n; i++) {
-		newX += As[i] * x(i);
-	}
-
-	// Add the B
-	newX += B;
-	
-	// Return this new matrix
-	return newX;
 
 }
 
@@ -531,14 +434,23 @@ int main(int argc, char ** argv) {
 	// Useful quantities
 	numPerm = sets*(sets-1)/2;
 	numMeasureB = sets;
-	numOutcomeB = d;
-	numUniquePer = (d*(d+1))/2;
-	numRealPer = numUniquePer*2;
+	numOutcomeB = d-1;
+	numUniquePer = (d*(d+1))/2-1;
+	numRealPer = numUniquePer;
+	numImagPer = numUniquePer+1-d;
+	numTotalPer = numRealPer + numImagPer;
 
 	// Sizes of matrices
-	n = numMeasureB*numOutcomeB*numRealPer;
-	m = numMeasureB*numRealPer;
-	p = numMeasureB*numOutcomeB*d*2;
+	n = numMeasureB*numOutcomeB*numTotalPer;
+	m = 0;
+	p = numMeasureB*(numOutcomeB+1)*d*2;
+
+	std::cout << "numUniquePer = " << numUniquePer << std::endl;
+	std::cout << "numRealPer = " << numRealPer << std::endl;
+	std::cout << "numImagPer = " << numImagPer << std::endl;
+	std::cout << "numTotalPer = " << numTotalPer << std::endl;
+	std::cout << "n = " << n << std::endl;
+	std::cout << "p = " << p << std::endl;
 
 	// The "ideal" value
 	double maxVal = numPerm*d*std::sqrt(d*(d-1));
@@ -556,17 +468,18 @@ int main(int argc, char ** argv) {
 		for (int k=0; k<numOutcomeB; k++) {
 
 			// Where in X/x this matrix starts
-			int matLoc = (i*numOutcomeB + k) * d;
-			int vecLoc = (i*numOutcomeB + k) * numRealPer;
+			int matLoc = (i*(numOutcomeB+1) + k) * d;
+			int finalMatLoc = (i*(numOutcomeB+1) + numOutcomeB) * d;
+			int vecLocReal = (i*numOutcomeB + k) * numTotalPer;
+			int vecLocImag = vecLocReal + numRealPer;
 			int nextX = 0;
 			int nextY = 0;
 
-			// Loop over these vector elements
-			for (int l=0; l<numUniquePer; l++) {
+			// For each real vector element
+			for (int l=0; l<numRealPer; l++) {
 
-				// Create two blank p by p matrices
+				// Create a blank p by p matrix
 				Eigen::MatrixXd newAReal = Eigen::MatrixXd::Zero(p, p);
-				Eigen::MatrixXd newAImag = Eigen::MatrixXd::Zero(p, p);
 
 				// Place the real comps in the diagonal blocks
 				newAReal(matLoc+nextX, matLoc+nextY) = 1;
@@ -574,11 +487,21 @@ int main(int argc, char ** argv) {
 				newAReal(matLoc+nextX+halfP, matLoc+nextY+halfP) = 1;
 				newAReal(matLoc+nextY+halfP, matLoc+nextX+halfP) = 1;
 
-				// Place the imag comps in the off-diagonal blocks
-				newAImag(matLoc+nextX+halfP, matLoc+nextY) = 1;
-				newAImag(matLoc+nextY, matLoc+nextX+halfP) = -1;
-				newAImag(matLoc+nextX, matLoc+nextY+halfP) = -1;
-				newAImag(matLoc+nextY+halfP, matLoc+nextX) = 1;
+				// Subtract to force trace one
+				if (nextX == nextY) {
+					newAReal(matLoc+d-1, matLoc+d-1) = -1;
+					newAReal(matLoc+d-1, matLoc+d-1) = -1;
+					newAReal(matLoc+d-1+halfP, matLoc+d-1+halfP) = -1;
+					newAReal(matLoc+d-1+halfP, matLoc+d-1+halfP) = -1;
+					newAReal(finalMatLoc+d-1, finalMatLoc+d-1) = 1;
+					newAReal(finalMatLoc+halfP+d-1, finalMatLoc+halfP+d-1) = 1;
+				}
+				
+				// Subtract to force sum to identity
+				newAReal(finalMatLoc+nextX, finalMatLoc+nextY) = -1;
+				newAReal(finalMatLoc+nextY, finalMatLoc+nextX) = -1;
+				newAReal(finalMatLoc+nextX+halfP, finalMatLoc+nextY+halfP) = -1;
+				newAReal(finalMatLoc+nextY+halfP, finalMatLoc+nextX+halfP) = -1;
 
 				// Move the location along
 				nextX++;
@@ -587,9 +510,42 @@ int main(int argc, char ** argv) {
 					nextX = nextY;
 				}
 
-				// Add these to the list
+				// Add this matrix to the list
 				As.push_back(newAReal);
+				prettyPrint("A real = ", newAReal);
+
+			}
+
+			// For each imag vector element
+			nextX = 1;
+			nextY = 0;
+			for (int l=0; l<numImagPer; l++) {
+
+				// Create a blank p by p matrix
+				Eigen::MatrixXd newAImag = Eigen::MatrixXd::Zero(p, p);
+
+				// Place the imag comps in the off-diagonal blocks
+				newAImag(matLoc+nextX+halfP, matLoc+nextY) = 1;
+				newAImag(matLoc+nextY, matLoc+nextX+halfP) = 1;
+				newAImag(matLoc+nextX, matLoc+nextY+halfP) = -1;
+				newAImag(matLoc+nextY+halfP, matLoc+nextX) = -1;
+
+				// Subtract to force sum to identity
+				newAImag(finalMatLoc+nextX+halfP, finalMatLoc+nextY) = -1;
+				newAImag(finalMatLoc+nextY, finalMatLoc+nextX+halfP) = -1;
+				newAImag(finalMatLoc+nextX, finalMatLoc+nextY+halfP) = 1;
+				newAImag(finalMatLoc+nextY+halfP, finalMatLoc+nextX) = 1;
+
+				// Move the location along
+				nextX++;
+				if (nextX >= d) {
+					nextY++;
+					nextX = nextY+1;
+				}
+
+				// Add this matrix to the list
 				As.push_back(newAImag);
+				prettyPrint("A imag = ", newAImag);
 
 			}
 
@@ -597,31 +553,48 @@ int main(int argc, char ** argv) {
 
 	}
 
-	// Calculate the B matrix used to make sure X is invertible
-	B = Eigen::MatrixXd::Identity(p,p) / d;
+	// Calculate the B matrix
+	B = Eigen::MatrixXd::Zero(p, p);
+	for (int i=0; i<numMeasureB; i++) {
+		for (int k=0; k<numOutcomeB; k++) {
+
+			// The trace of each should be 1
+			int matLoc = (i*(numOutcomeB+1) + k) * d;
+			B(matLoc+d-1, matLoc+d-1) = 1;
+			B(matLoc+halfP+d-1, matLoc+halfP+d-1) = 1;
+
+		}
+
+		// The last of each measurement should be the identity
+		int matLoc = (i*(numOutcomeB+1) + numOutcomeB) * d;
+		for (int a=0; a<d-1; a++) {
+			B(matLoc+a, matLoc+a) = 1;
+			B(matLoc+halfP+a, matLoc+halfP+a) = 1;
+		}
+
+	}
 
 	// The interior point to optimise
 	interiorPoint w(n, m, p);
 
 	// Initialise x
-	w.x << 1.0, 0.0,    0.0, 0.0,     0.0, 0.0,
-		   0.0, 0.0,    0.0, 0.0,     1.0, 0.0,
-		   0.5, 0.0,    0.5, 0.0,     0.5, 0.0,
-		   0.5, 0.0,   -0.5, 0.0,     0.5, 0.0;
-	//w.x << 1.0, 0.0,    0.0, 0.0,     0.0, 0.0,
-		   //0.0, 0.0,    0.0, 0.0,     1.0, 0.0,
-		   //0.6, 0.0,    0.5, 0.0,     0.4, 0.0,
-		   //0.4, 0.0,   -0.5, 0.0,     0.6, 0.0;
-	//w.x << 1.0, 0.0,    0.0, 0.0,     0.0, 0.0,
-		   //0.0, 0.0,    0.0, 0.0,     1.0, 0.0,
-		   //1.0, 0.0,    0.0, 0.0,     0.0, 0.0,
-		   //0.0, 0.0,    0.0, 0.0,     1.0, 0.0;
+	w.x << 1.0, 0.0,   0.0,     0.7, 0.5,     0.0;
+	//w.x = Eigen::VectorXd::Random(n);
 
 	// Initialise Z
 	w.Z = Eigen::MatrixXd::Identity(p, p);
 
 	// Calculate the initial G, the Hessian of L(w)
 	Eigen::MatrixXd G = del2L(w);
+
+	// Test new X(x) TODO
+	prettyPrint("X(x) = ", X(w.x));
+	std::cout << "f(x) = " <<  f(w.x) << std::endl;
+	prettyPrint("delf(x) = ", delf(w.x));
+	prettyPrint("del2f(x) = ", del2f(w.x));
+	prettyPrint("G(w) = ", G);
+	std::cout << G.determinant() << std::endl;
+	return 0;
 
 	// See if G isn't PSD
 	if (G.ldlt().info() != Eigen::ComputationInfo::Success) {
