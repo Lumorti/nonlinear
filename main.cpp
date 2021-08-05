@@ -149,13 +149,18 @@ void prettyPrint(std::string pre, Eigen::Matrix<type, -1, -1> arr) {
 
 }
 
-// Pretty print a complex 2D sparse Eigen array
+// Pretty print a general 2D sparse Eigen array
 template <typename type>
 void prettyPrint(std::string pre, Eigen::SparseMatrix<type> arr) {
 
 	// Extract the dense array and then call the routine as normal
 	prettyPrint(pre, Eigen::Matrix<type,-1,-1>(arr));
 
+}
+
+// Pretty print a double
+void prettyPrint(std::string pre, double val) {
+	std::cout << pre << val << std::endl;
 }
 
 // Get the smallest eigenvalue of a matrix
@@ -203,7 +208,7 @@ Eigen::MatrixXd X(Eigen::VectorXd x, double extra=0.01) {
 
 }
 
-// Objective function TODO new format
+// Objective function 
 double f(Eigen::VectorXd x) {
 
 	// Init the return val
@@ -225,8 +230,13 @@ double f(Eigen::VectorXd x) {
 					int r1 = (i * (numOutcomeB+1) + k) * d;
 					int r2 = (j * (numOutcomeB+1) + l) * d;
 
-					// Add this inner product of the submatrices
-					val += std::sqrt(1.0 - XCached.block(r1, r1, d, d).cwiseProduct(XCached.block(r2, r2, d, d)).sum() + XCached.block(r1, r1+halfP, d, d).cwiseProduct(XCached.block(r2+halfP, r2, d, d)).sum());
+					// For readability
+					double prodReal = XCached.block(r1,r1,d,d).cwiseProduct(XCached.block(r2,r2,d,d)).sum();
+					double prodImag = XCached.block(r1+halfP,r1,d,d).cwiseProduct(XCached.block(r2,r2+halfP,d,d)).sum();
+					double d = 1.0 - prodReal + prodImag;
+
+					// Update the value
+					val -= std::sqrt(d);
 
 				}
 			}
@@ -239,7 +249,7 @@ double f(Eigen::VectorXd x) {
 
 }
 
-// Gradient of the objective function
+// Gradient of the objective function TODO
 Eigen::VectorXd delf(Eigen::VectorXd x) {
 
 	// Init the return val
@@ -250,7 +260,7 @@ Eigen::VectorXd delf(Eigen::VectorXd x) {
 	int halfP = p / 2;
 
 	// For each component of the vector
-	for (int a=0; a<n; a++) {
+	for (int b=0; b<n; b++) {
 
 		// For each pair of measurements
 		for (int i=0; i<numMeasureB; i++) {
@@ -260,16 +270,31 @@ Eigen::VectorXd delf(Eigen::VectorXd x) {
 				for (int k=0; k<numOutcomeB; k++) {
 					for (int l=0; l<numOutcomeB; l++) {
 
-						// Only if this a is part of this measurement TODO
-
 						// Start locations of the real and imag submatrices
 						int r1 = (i * (numOutcomeB+1) + k) * d;
 						int r2 = (j * (numOutcomeB+1) + l) * d;
 
-						// If it's imaginary TODO
+						// This is very weird unless each block is given its own memory
+						Eigen::MatrixXd XReal1 = XCached.block(r1,r1,d,d);
+						Eigen::MatrixXd XReal2 = XCached.block(r2,r2,d,d);
+						Eigen::MatrixXd XImag1 = XCached.block(r1+halfP,r1,d,d);
+						Eigen::MatrixXd XImag2 = XCached.block(r2,r2+halfP,d,d);
+						Eigen::MatrixXd BReal1 = As[b].block(r1,r1,d,d);
+						Eigen::MatrixXd BReal2 = As[b].block(r2,r2,d,d);
+						Eigen::MatrixXd BImag1 = As[b].block(r1+halfP,r1,d,d);
+						Eigen::MatrixXd BImag2 = As[b].block(r2,r2+halfP,d,d);
+
+						// For readability
+						double LRBX = BReal1.cwiseProduct(XReal2).sum();
+						double RRBX = XReal1.cwiseProduct(BReal2).sum();
+						double LIBX = BImag1.cwiseProduct(XImag2).sum();
+						double RIBX = XImag1.cwiseProduct(BImag2).sum();
+						double prodReal = XReal1.cwiseProduct(XReal2).sum();
+						double prodImag = XImag1.cwiseProduct(XImag2).sum();
+						double d = 1.0 - prodReal + prodImag;
 
 						// Add this inner product of the submatrices
-						vals(a) -= As[a].block(r1,r1,d,d).cwiseProduct(XCached.block(r2,r2,d,d)).sum() / (2 * std::sqrt(1.0 - XCached.block(r1,r1,d,d).cwiseProduct(XCached.block(r2,r2,d,d)).sum() + XCached.block(r1,r1+halfP,d,d).cwiseProduct(XCached.block(r2+halfP,r2,d,d)).sum()));
+						vals(b) -= 0.5 * std::pow(d, -0.5) * (-LRBX-RRBX+LIBX+RIBX);
 
 					}
 				}
@@ -295,8 +320,8 @@ Eigen::MatrixXd del2f(Eigen::VectorXd x) {
 	int halfP = p / 2;
 
 	// For each component of the vector
-	for (int a=0; a<n; a++) {
-		for (int b=0; b<n; b++) {
+	for (int b=0; b<n; b++) {
+		for (int c=0; c<n; c++) {
 
 			// For each pair of measurements
 			for (int i=0; i<numMeasureB; i++) {
@@ -310,19 +335,45 @@ Eigen::MatrixXd del2f(Eigen::VectorXd x) {
 							int r1 = (i * (numOutcomeB+1) + k) * d;
 							int r2 = (j * (numOutcomeB+1) + l) * d;
 
-							// Needs a definition so it has properly assigned memory for .block
-							Eigen::MatrixXd xAa = x(a)*As[a];
-							Eigen::MatrixXd xAb = x(b)*As[b];
+							// This is very weird unless each block is given its own memory
+							Eigen::MatrixXd XReal1 = XCached.block(r1,r1,d,d);
+							Eigen::MatrixXd XReal2 = XCached.block(r2,r2,d,d);
+							Eigen::MatrixXd XImag1 = XCached.block(r1+halfP,r1,d,d);
+							Eigen::MatrixXd XImag2 = XCached.block(r2,r2+halfP,d,d);
+							Eigen::MatrixXd BReal1 = As[b].block(r1,r1,d,d);
+							Eigen::MatrixXd BReal2 = As[b].block(r2,r2,d,d);
+							Eigen::MatrixXd BImag1 = As[b].block(r1+halfP,r1,d,d);
+							Eigen::MatrixXd BImag2 = As[b].block(r2,r2+halfP,d,d);
+							Eigen::MatrixXd CReal1 = As[c].block(r1,r1,d,d);
+							Eigen::MatrixXd CReal2 = As[c].block(r2,r2,d,d);
+							Eigen::MatrixXd CImag1 = As[c].block(r1+halfP,r1,d,d);
+							Eigen::MatrixXd CImag2 = As[c].block(r2,r2+halfP,d,d);
 
-							if (a == b) {
+							// Components with As[b] and X
+							double LRBX = BReal1.cwiseProduct(XReal2).sum();
+							double RRBX = XReal1.cwiseProduct(BReal2).sum();
+							double LIBX = BImag1.cwiseProduct(XImag2).sum();
+							double RIBX = XImag1.cwiseProduct(BImag2).sum();
 
+							// Components with As[c] and X
+							double LRCX = CReal1.cwiseProduct(XReal2).sum();
+							double RRCX = XReal1.cwiseProduct(CReal2).sum();
+							double LICX = CImag1.cwiseProduct(XImag2).sum();
+							double RICX = XImag1.cwiseProduct(CImag2).sum();
 
-							} else {
+							// Components with As[b] and As[c]
+							double LRBC = BReal1.cwiseProduct(CReal2).sum();
+							double RRBC = CReal1.cwiseProduct(BReal2).sum();
+							double LIBC = BImag1.cwiseProduct(CImag2).sum();
+							double RIBC = CImag1.cwiseProduct(BImag2).sum();
 
-								// Add this inner product of the submatrices
-								vals(a, b) -= xAb.block(r1,r1,d,d).cwiseProduct(xAa.block(r1,r1,d,d)).cwiseProduct(XCached.block(r2,r2,d,d)).sum() / (4 * std::pow(1.0 - XCached.block(r1,r1,d,d).cwiseProduct(XCached.block(r2,r2,d,d)).sum() + XCached.block(r1,r1+halfP,d,d).cwiseProduct(XCached.block(r2+halfP,r2,d,d)).sum()), 1.5);
+							// For readability
+							double prodReal = XReal1.cwiseProduct(XReal2).sum();
+							double prodImag = XImag1.cwiseProduct(XImag2).sum();
+							double d = 1.0 - prodReal + prodImag;
 
-							}
+							// Add this inner product of the submatrices
+							vals(b, c) += 0.25 * std::pow(d, -1.5) * (-LRBX-RRBX+LIBX+RIBX) * (-LRCX-RRCX+LICX+RICX) - 0.5 * std::pow(d, -0.5) * (-LRBC-RRBC+LIBC+RIBC);
 
 						}
 					}
@@ -512,7 +563,6 @@ int main(int argc, char ** argv) {
 
 				// Add this matrix to the list
 				As.push_back(newAReal);
-				prettyPrint("A real = ", newAReal);
 
 			}
 
@@ -545,7 +595,6 @@ int main(int argc, char ** argv) {
 
 				// Add this matrix to the list
 				As.push_back(newAImag);
-				prettyPrint("A imag = ", newAImag);
 
 			}
 
@@ -578,7 +627,8 @@ int main(int argc, char ** argv) {
 	interiorPoint w(n, m, p);
 
 	// Initialise x
-	w.x << 1.0, 0.0,   0.0,     0.7, 0.5,     0.0;
+	w.x << 1.0, 0.0,   0.0,     0.6, 0.5,     0.0;
+	//srand((unsigned int) time(0));
 	//w.x = Eigen::VectorXd::Random(n);
 
 	// Initialise Z
@@ -592,9 +642,6 @@ int main(int argc, char ** argv) {
 	std::cout << "f(x) = " <<  f(w.x) << std::endl;
 	prettyPrint("delf(x) = ", delf(w.x));
 	prettyPrint("del2f(x) = ", del2f(w.x));
-	prettyPrint("G(w) = ", G);
-	std::cout << G.determinant() << std::endl;
-	return 0;
 
 	// See if G isn't PSD
 	if (G.ldlt().info() != Eigen::ComputationInfo::Success) {
@@ -626,6 +673,7 @@ int main(int argc, char ** argv) {
 		G = G-sigma*I;
 
 	}
+	return 0;
 			
 	// Outer loop
 	int maxIter = 3;
@@ -672,9 +720,9 @@ int main(int argc, char ** argv) {
 			G += -((G*(s*(sTran*G))) / (s.dot(G*s))) + ((qBar*qBar.transpose()) / (s.dot(qBar)));
 	std::cout << "here8" << std::endl;
 
-			// Calculate direction
+			// Calculate direction TODO
 			interiorPoint delta(n, m, p);
-			delta.x = -g(w.x)*A_0.inverse(); // TODO A_0 is not invertable
+			delta.x = -g(w.x)*A_0.inverse();
 	std::cout << "here8.1" << std::endl;
 			Eigen::MatrixXd DeltaX = X(delta.x);
 	std::cout << "here8.2" << std::endl;
