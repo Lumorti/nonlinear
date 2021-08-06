@@ -20,7 +20,8 @@ subject to:
 \begin{align}
 	M_k^i &\succeq 0 \\
 	\sum_k^d M_k^i &= \mathbb{I} \\
-	\text{tr}(M_k^i) &= 1
+	\text{tr}(M_k^i) &= 1 \\
+	(M_k^i)^2 &= M_k^i
 \end{align}
 
 Need to define three functions for this method: the objective function $f(x)$, the constraint function $g(x)$ and the function $X(x)$ converting between the vector form $x$ and the matrix form such that $X(x)$ is positive semidefinite. These functions do not need to be linear.
@@ -47,12 +48,12 @@ such that it turns a vector $x \in \mathbb{R}^n$ containing the unique elements 
 	\end{pmatrix}
 \end{equation}
 
-Many of these elements are defined in relation to others such that the vector $x$ contains as little information as needed, whilst also forcing the submatrices of any $X(x)$ to satisfy the identity and trace constraints. This also has the benefit of meaning in our case $g(x)$ is unneeded, so is set to be zero (along with its first and second derivatives).
+Many of these elements are defined in relation to others such that the vector $x$ contains as little information as needed, whilst also forcing the submatrices of any $X(x)$ to satisfy the identity and trace constraints. This also has the benefit of meaning in our case $g(x)$ is only used for the projective constraint.
 
 Splitting the objective function into real and imaginary components and using the identity $\text{tr}(M_k^i M_l^j) = M_k^i \cdot M_l^j$:
 
 \begin{equation}
-	f(x) = \sum_{i,j}^s \sum_{k,l}^d -\sqrt{1 - R_k^i \cdot R_l^j + I_k^i \cdot I_l^j} 
+	f(x) = \sum_{i,j}^s \sum_{k,l}^d -\sqrt{1 - R_k^i \cdot R_l^j + I_k^i \cdot I_l^j}
 \end{equation}
 
 Now defining the extraction matrices $C_k^i$, $D_k^i$, $E_k^i$ and $F_k^i$ such that $C_k^i X D_k^i = R_k^i$ and $E_k^i X F_k^i = I_k^i$ with the notation that $X = X(x)$:
