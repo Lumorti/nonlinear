@@ -20,22 +20,22 @@ int d = 2;
 int sets = 2;
 
 // Optimisation parameters
-double extraDiag = 0.000001;
-int maxOuterIter = 50;
-int maxInnerIter = 50;
-double muScaling = 2;
+double extraDiag = 0.0001;
+int maxOuterIter = 10000;
+int maxInnerIter = 10000;
+double muScaling = 10;
 
 // Parameters between 0 and 1
-double gammaVal = 0.01;
+double gammaVal = 0.1;
 double epsilonZero = 0.9;
-double beta = 0.9;
+double beta = 0.7;
 
 // Parameters greater than 0
-double epsilon = 1.0; // The convergence threshold for the outer
-double M_c = 0.1;     // M_c * mu is the convergence threshold for the inner
-double mu = 1.0;      // This decreases each iteration and affects many things
-double nu = 0.9;      // Affects the merit function
-double rho = 0.4;     // Affects the merit function
+double epsilon = 0.01;   // The convergence threshold for the outer
+double M_c = 1000000;    // M_c * mu is the convergence threshold for the inner
+double mu = 1.0;         // This decreases each iteration and affects many things
+double nu = 0.9;         // Affects the merit function
+double rho = 0.5;        // Affects the merit function
 
 // Useful quantities
 int numPerm = 0;
@@ -106,7 +106,7 @@ void prettyPrint(std::string pre, Eigen::Matrix<type, -1, 1> arr) {
 	std::cout << std::noshowpos;
 
 }
-// Pretty print a complex 2D dense Eigen array
+// Pretty print a general 2D dense Eigen array
 template <typename type>
 void prettyPrint(std::string pre, Eigen::Matrix<type, -1, -1> arr) {
 
@@ -134,7 +134,7 @@ void prettyPrint(std::string pre, Eigen::Matrix<type, -1, -1> arr) {
 
 		// For the x values, combine them all on one line
 		for (int x=0; x<arr.cols(); x++) {
-			std::cout << std::setw(5) << arr(y,x);
+			std::cout << std::setw(precision+2) << arr(y,x);
 			if (x < arr.cols()-1) {
 				std::cout << ", ";
 			}
@@ -221,12 +221,12 @@ double f(Eigen::VectorXd x) {
 		for (int j=i+1; j<numMeasureB; j++) {
 	
 			// For each outcome of these measurements
-			for (int k=0; k<numOutcomeB+1; k++) {
-				for (int l=0; l<numOutcomeB+1; l++) {
+			for (int k=0; k<numOutcomeB; k++) {
+				for (int l=0; l<numOutcomeB; l++) {
 
 					// Start locations of the real and imag submatrices
-					int r1 = (i * (numOutcomeB+1) + k) * d;
-					int r2 = (j * (numOutcomeB+1) + l) * d;
+					int r1 = (i*numOutcomeB + k) * d;
+					int r2 = (j*numOutcomeB + l) * d;
 
 					// This is very weird unless each block is given its own memory
 					Eigen::MatrixXd XReal1 = XCached.block(r1,r1,d,d);
@@ -275,8 +275,8 @@ Eigen::VectorXd delf(Eigen::VectorXd x) {
 					for (int l=0; l<numOutcomeB; l++) {
 
 						// Start locations of the real and imag submatrices
-						int r1 = (i * (numOutcomeB+1) + k) * d;
-						int r2 = (j * (numOutcomeB+1) + l) * d;
+						int r1 = (i*numOutcomeB + k) * d;
+						int r2 = (j*numOutcomeB + l) * d;
 
 						// This is very weird unless each block is given its own memory
 						Eigen::MatrixXd XReal1 = XCached.block(r1,r1,d,d);
@@ -336,8 +336,8 @@ Eigen::MatrixXd del2f(Eigen::VectorXd x) {
 						for (int l=0; l<numOutcomeB; l++) {
 
 							// Start locations of the real and imag submatrices
-							int r1 = (i * (numOutcomeB+1) + k) * d;
-							int r2 = (j * (numOutcomeB+1) + l) * d;
+							int r1 = (i*numOutcomeB + k) * d;
+							int r2 = (j*numOutcomeB + l) * d;
 
 							// This is very weird unless each block is given its own memory
 							Eigen::MatrixXd XReal1 = XCached.block(r1,r1,d,d);
@@ -456,19 +456,14 @@ double L(Eigen::VectorXd x, Eigen::VectorXd y, Eigen::MatrixXd Z) {
 // Differential of the Lagrangian given individual components
 Eigen::VectorXd delL(Eigen::VectorXd y, Eigen::MatrixXd Z, Eigen::VectorXd delfCached, Eigen::MatrixXd A_0) {
 
-	// Start with a vector of n elements
-	Eigen::VectorXd vals = Eigen::VectorXd::Zero(n);
-
-	// Calculate the first part as in the paper
-	vals = delfCached - A_0.transpose()*y;
-
-	// Then the second 
+	// Calculate A* Z
+	Eigen::VectorXd AStarZ = Eigen::VectorXd::Zero(n);
 	for (int i=0; i<n; i++) {
-		vals(i) -= As[i].cwiseProduct(Z).sum();
+		AStarZ(i) = As[i].cwiseProduct(Z).sum();
 	}
 
 	// Return this vector
-	return vals;
+	return delfCached - A_0.transpose()*y - AStarZ;
 
 }
 
@@ -661,16 +656,16 @@ int main(int argc, char ** argv) {
 	// Useful quantities
 	numPerm = sets*(sets-1)/2;
 	numMeasureB = sets;
-	numOutcomeB = d-1;
+	numOutcomeB = d;
 	numUniquePer = (d*(d+1))/2-1;
 	numRealPer = numUniquePer;
 	numImagPer = numUniquePer+1-d;
 	numTotalPer = numRealPer + numImagPer;
 
 	// Sizes of matrices
-	n = numMeasureB*numOutcomeB*numTotalPer;
+	n = numMeasureB*(numOutcomeB-1)*numTotalPer;
 	m = 1;
-	p = numMeasureB*(numOutcomeB+1)*d*2;
+	p = numMeasureB*numOutcomeB*d*2;
 
 	std::cout << "numUniquePer = " << numUniquePer << std::endl;
 	std::cout << "numRealPer = " << numRealPer << std::endl;
@@ -685,17 +680,17 @@ int main(int argc, char ** argv) {
 	// Calculate the A matrices uses to turn X to x
 	int halfP = p / 2;
 	for (int i=0; i<numMeasureB; i++) {
-		for (int k=0; k<numOutcomeB; k++) {
+		for (int k=0; k<numOutcomeB-1; k++) {
 
 			// Where in X/x this matrix starts
-			int matLoc = (i*(numOutcomeB+1) + k) * d;
-			int finalMatLoc = (i*(numOutcomeB+1) + numOutcomeB) * d;
-			int vecLocReal = (i*numOutcomeB + k) * numTotalPer;
+			int matLoc = (i*numOutcomeB + k) * d;
+			int finalMatLoc = (i*numOutcomeB + numOutcomeB-1) * d;
+			int vecLocReal = (i*(numOutcomeB-1) + k) * numTotalPer;
 			int vecLocImag = vecLocReal + numRealPer;
 			int nextX = 0;
 			int nextY = 0;
 
-			// For each real vector element
+			// For each real vector element in that matrix
 			for (int l=0; l<numRealPer; l++) {
 
 				// Create a blank p by p matrix
@@ -774,17 +769,17 @@ int main(int argc, char ** argv) {
 	// Calculate the B matrix
 	B = Eigen::MatrixXd::Zero(p, p);
 	for (int i=0; i<numMeasureB; i++) {
-		for (int k=0; k<numOutcomeB; k++) {
+		for (int k=0; k<numOutcomeB-1; k++) {
 
 			// The trace of each should be 1
-			int matLoc = (i*(numOutcomeB+1) + k) * d;
+			int matLoc = (i*numOutcomeB + k) * d;
 			B(matLoc+d-1, matLoc+d-1) = 1;
 			B(matLoc+halfP+d-1, matLoc+halfP+d-1) = 1;
 
 		}
 
 		// The last of each measurement should be the identity
-		int matLoc = (i*(numOutcomeB+1) + numOutcomeB) * d;
+		int matLoc = (i*numOutcomeB + numOutcomeB-1) * d;
 		for (int a=0; a<d-1; a++) {
 			B(matLoc+a, matLoc+a) = 1;
 			B(matLoc+halfP+a, matLoc+halfP+a) = 1;
@@ -797,24 +792,41 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd y = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd Z = Eigen::MatrixXd::Zero(p, p);
 
-	// Initialise x TODO the ideal does not have zero rMag
-	double ran = 0.50;
-	x << 1.0, 0.0,   0.0,     ran, std::sqrt(ran)*std::sqrt(1-ran),     0.0;
-	Eigen::MatrixXd XCached = X(x);
+	// Initialise x TODO
+	double ran = 0.30;
+	//x << 1.0, 0.0,   0.0,     ran, std::sqrt(ran)*std::sqrt(1-ran),     0.0;
+
+	// First measurement can just be ones
+	for (int j=0; j<numOutcomeB-1; j++) {
+		x(numTotalPer*j + j) = 1;
+	}
+
+	Eigen::MatrixXd XFinal2 = X(x, 0);
+	precision = 1;
+	prettyPrint("x = ", x);
+	std::cout << std::endl;
+	std::vector<Eigen::MatrixXcd> Ms2(numMeasureB*numOutcomeB, Eigen::MatrixXd::Zero(d,d));
+	for (int i=0; i<numMeasureB; i++) {
+		for (int j=0; j<numOutcomeB; j++) {
+			int ind = i*numOutcomeB + j;
+			Ms2[ind] = XFinal2.block(ind*d, ind*d, d, d) + 1i*XFinal2.block(ind*d+halfP, ind*d, d, d);
+			std::cout << std::endl;
+			prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", Ms2[ind]);
+		}
+	}
+	return 0;
 
 	// Initialise Z
-	Z = Eigen::MatrixXd::Identity(p, p);
-	Z.block(0,0,2,2) = XCached.block(2,2,2,2);
-	Z.block(2,2,2,2) = XCached.block(0,0,2,2);
-	Z.block(4,4,2,2) = XCached.block(6,6,2,2);
-	Z.block(6,6,2,2) = XCached.block(4,4,2,2);
-	Z.block(8,8,2,2) = XCached.block(2,2,2,2);
-	Z.block(10,10,2,2) = XCached.block(0,0,2,2);
-	Z.block(12,12,2,2) = XCached.block(6,6,2,2);
-	Z.block(14,14,2,2) = XCached.block(4,4,2,2);
-
-	// G, the Hessian of L(w)
-	Eigen::MatrixXd G = Eigen::MatrixXd::Zero(n,n);
+	Eigen::MatrixXd XCached = X(x);
+	Z = Eigen::MatrixXd::Zero(p, p);
+	for (int i=0; i<numMeasureB; i++) {
+		for (int j=0; j<numOutcomeB; j++) {
+			int currentLoc = (i*numOutcomeB + j) * d;
+			int copyLoc = (i*numOutcomeB + ((j+1) % numOutcomeB)) * d;
+			Z.block(currentLoc,currentLoc,d,d) = XCached.block(copyLoc,copyLoc,d,d);
+			Z.block(currentLoc+halfP,currentLoc+halfP,d,d) = XCached.block(copyLoc,copyLoc,d,d);
+		}
+	}
 
 	// Cache things
 	Eigen::MatrixXd XInverse = XCached.inverse();
@@ -825,13 +837,12 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd delLCached = delL(y, Z, delfCached, A_0);
 
 	// To prevent reinit each time
+	Eigen::MatrixXd G = Eigen::MatrixXd::Zero(n,n);
 	Eigen::MatrixXd T = Eigen::MatrixXd::Zero(n, n);
 	Eigen::MatrixXd H = Eigen::MatrixXd::Zero(n, n);
 	Eigen::VectorXd AStarXInverse = Eigen::VectorXd::Zero(n);
 	Eigen::MatrixXd GHInverse = Eigen::MatrixXd::Zero(n, n);
 	Eigen::MatrixXd deltaX = Eigen::MatrixXd::Zero(n, n);
-
-	// The delta components
 	Eigen::VectorXd deltax = Eigen::VectorXd::Zero(n);
 	Eigen::VectorXd deltay = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd deltaZ = Eigen::MatrixXd::Zero(p, p);
@@ -840,6 +851,7 @@ int main(int argc, char ** argv) {
 	double rMagZero = 0;
 	double rMagMu = 0;
 	int k = 0;
+	int totalInner = 0;
 	for (k=0; k<maxOuterIter; k++) {
 
 		// Check if global convergence is reached
@@ -862,6 +874,7 @@ int main(int argc, char ** argv) {
 		// Otherwise find the optimum for the current mu
 		double epsilonPrime = M_c * mu;
 		for (int k2=0; k2<maxInnerIter; k2++) {
+			totalInner++;
 		
 			// Update the caches
 			XCached = X(x);
@@ -964,7 +977,7 @@ int main(int argc, char ** argv) {
 			
 			// Inner-iteration output
 			rMagMu = rMag(mu, Z, XCached, delLCached, gCached);
-			std::cout << "f(x) = " << f(x) << " r = " << rMagMu  << " ?< " << epsilonPrime << " L(w) = " << L(x, y, Z)  << " g(x) = " << gCached << "  y = " << y << "  alpha = " << alpha << std::endl;
+			std::cout << "f(x) = " << f(x) << " r = " << rMagMu  << " ?< " << epsilonPrime << " g(x) = " << gCached << std::endl;
 			
 			// Check if local convergence is reached
 			if (rMagMu <= epsilonPrime) {
@@ -987,11 +1000,12 @@ int main(int argc, char ** argv) {
 	std::cout << "      Final Matrices " << std::endl;;
 	std::cout << "--------------------------------" << std::endl;
 	Eigen::MatrixXd XFinal = X(x, 0);
-	std::vector<Eigen::MatrixXcd> Ms(numMeasureB*(numOutcomeB+1), Eigen::MatrixXd::Zero(d,d));
+	std::vector<Eigen::MatrixXcd> Ms(numMeasureB*numOutcomeB, Eigen::MatrixXd::Zero(d,d));
 	for (int i=0; i<numMeasureB; i++) {
-		for (int j=0; j<numOutcomeB+1; j++) {
-			int ind = i*(numOutcomeB+1) + j;
+		for (int j=0; j<numOutcomeB; j++) {
+			int ind = i*numOutcomeB + j;
 			Ms[ind] = XFinal.block(ind*d, ind*d, d, d) + 1i*XFinal.block(ind*d+halfP, ind*d, d, d);
+			std::cout << std::endl;
 			prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", Ms[ind]);
 		}
 	}
@@ -1005,7 +1019,8 @@ int main(int argc, char ** argv) {
 	std::cout << "    final f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
 	std::cout << "    final L(w) = " << -L(x, y, Z) << std::endl;;
 	std::cout << "    final g(x) = " << gCached << std::endl;;
-	std::cout << "    iterations = " << k << std::endl;;
+	std::cout << "   outer iters = " << k << std::endl;;
+	std::cout << "   total inner = " << totalInner << std::endl;;
 	std::cout << "          time = " << std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count() << " ms" << std::endl;
 
 	// Everything went fine
