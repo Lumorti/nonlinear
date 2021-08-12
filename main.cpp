@@ -18,15 +18,16 @@ using namespace std::complex_literals;
 // Defining the MUB problem
 int d = 2;
 int sets = 2;
+bool useRandom = false;
 
 // Optimisation parameters
-double extraDiag = 0.0001;
+double extraDiag = 0.000001;
 int maxOuterIter = 10000;
 int maxInnerIter = 10000;
 double muScaling = 10;
 
 // Parameters between 0 and 1
-double gammaVal = 0.1;
+double gammaVal = 0.01;
 double epsilonZero = 0.9;
 double beta = 0.7;
 
@@ -272,7 +273,7 @@ Eigen::MatrixXd XNoB(Eigen::VectorXd x) {
 
 }
 
-// Objective function
+// Objective function TODO not working for optimum d2n3 (i.e. imag)
 double f(Eigen::VectorXd x) {
 
 	// Init the return val
@@ -303,6 +304,13 @@ double f(Eigen::VectorXd x) {
 					double prodReal = XReal1.cwiseProduct(XReal2).sum();
 					double prodImag = XImag1.cwiseProduct(XImag2).sum();
 					double d = 1.0 - prodReal + prodImag;
+
+					//std::cout << std::endl;
+					//prettyPrint("XReal1 = ", XReal1);
+					//prettyPrint("XReal2 = ", XReal2);
+					//prettyPrint("XImag1 = ", XImag1);
+					//prettyPrint("XImag2 = ", XImag2);
+					//std::cout << prodReal << " " << prodImag << " " << d << std::endl;
 
 					// Update the value
 					val -= std::sqrt(d);
@@ -473,7 +481,7 @@ Eigen::VectorXd g(Eigen::VectorXd x) {
 
 }
 
-// Gradient of the constraint function 
+// Gradient of the constraint function TODO maybe needs the Bs?
 Eigen::MatrixXd delg(Eigen::VectorXd x) {
 
 	// Matrix representing the Jacobian of g
@@ -596,6 +604,9 @@ double deltaF(Eigen::VectorXd x, Eigen::VectorXd deltax, Eigen::MatrixXd Z, Eige
 bool isPD(Eigen::MatrixXd G) {
 	return G.ldlt().info() != Eigen::NumericalIssue;
 }
+bool isComplexPD(Eigen::MatrixXcd G) {
+	return G.ldlt().info() != Eigen::NumericalIssue;
+}
 
 // Standard cpp entry point
 int main(int argc, char ** argv) {
@@ -619,6 +630,7 @@ int main(int argc, char ** argv) {
 			std::cout << " -d [int]         set the dimension" << std::endl;
 			std::cout << " -n [int]         set the number of measurements" << std::endl;
 			std::cout << " -p [int]         set the precision" << std::endl;
+			std::cout << " -R               use a random intial point" << std::endl;
 			std::cout << "                        " << std::endl;
 			std::cout << "    tolerance options          " << std::endl;
 			std::cout << " -e [dbl]         set epsilon" << std::endl;
@@ -639,6 +651,10 @@ int main(int argc, char ** argv) {
 		} else if (arg == "-d") {
 			d = std::stoi(argv[i+1]);
 			i += 1;
+
+		// If told to use a random start rather than the default seed
+		} else if (arg == "-R") {
+			useRandom = true;
 
 		// Set the number of sets
 		} else if (arg == "-n") {
@@ -857,69 +873,98 @@ int main(int argc, char ** argv) {
 	Eigen::MatrixXd Z = Eigen::MatrixXd::Zero(p, p);
 
 	// Seed so it's random each time
-	srand((unsigned int) time(0));
+	if (useRandom) {
+		srand((unsigned int) time(0));
+	}
 
 	// Form the X matrix explicitly, than convert to x
 	Eigen::MatrixXd XCached = Eigen::MatrixXd::Zero(p, p);
 
-	// For each unique matrix needed TODO 1-M-M is not projective
+	// For each measurement calculate a set of d rank one POVMs
 	for (int i=0; i<numMeasureB; i++) {
-		for (int j=0; j<numOutcomeB-1; j++) {
-			int ind = (i*numOutcomeB + j) * d;
 
-			// Get a random vector of length d
-			Eigen::VectorXcd tempVec = Eigen::VectorXcd::Random(d);
-			tempVec.normalize();
+		// Start with a series of random normalized vectors
+		std::vector<Eigen::VectorXcd> vecs(numOutcomeB, Eigen::VectorXcd::Zero(d));
+		for (int j=0; j<vecs.size(); j++) {
+			vecs[j] = Eigen::VectorXcd::Random(d).normalized();
+		}
 
-			// Form a d by d matrix from this
-			Eigen::MatrixXcd tempMat = tempVec * tempVec.adjoint();
-			prettyPrint("mat = ", tempMat);
-			std::cout << (tempMat.adjoint()*tempMat - tempMat).trace() << std::endl;
-			std::cout << std::endl;
+		// Keep iterating until self-consistent
+		std::vector<Eigen::MatrixXcd> deltas(numOutcomeB, Eigen::MatrixXcd::Zero(d, d));
+		for (int i=0; i<200; i++) {
 
-			// Add this to the initial matrix
-			XCached.block(ind, ind, d, d) = tempMat.real();
-			XCached.block(ind, ind+halfP, d, d) = tempMat.imag();
+			// Calculate the gradient matrices (identity - all the others)
+			for (int j=0; j<vecs.size(); j++) {
+				deltas[j] = Eigen::MatrixXcd::Identity(d, d);
+				for (int k=0; k<vecs.size(); k++) {
+					if (j == k) {continue;}
+					deltas[j] -= vecs[k] * vecs[k].adjoint();
+				}
+			}
+			
+			// Update everything
+			Eigen::MatrixXcd total = Eigen::MatrixXcd::Identity(d, d);
+			for (int j=0; j<vecs.size(); j++) {
+				vecs[j] = (deltas[j] * vecs[j]).normalized();
+				total -= vecs[j] * vecs[j].adjoint();
+			}
+
+			//std::cout << total.squaredNorm() << std::endl;
 
 		}
+
+		// Copy them into the big matrix
+		for (int j=0; j<vecs.size(); j++) {
+			int ind = (i*numOutcomeB + j) * d;
+			Eigen::MatrixXcd tempMat = vecs[j] * vecs[j].adjoint();
+			XCached.block(ind, ind, d, d) = tempMat.real();
+			XCached.block(ind, ind+halfP, d, d) = tempMat.imag();
+		}
+
 	}
 
-	// Ensure x and X are consistent
-	prettyPrint("X before = ", XCached);
-	std::cout << std::endl;
+	// Extrat the x from this X
 	x = Xtox(XCached);
-	XCached = X(x);
-	prettyPrint("X after = ", XCached);
-	std::cout << std::endl;
+
+	// TODO try d2n3 optimum
+	if (sets == 2 && d == 2) {
+		double v = 0.4;
+		x << 1.0, 0.0,   0.0,     
+		     v, std::sqrt(v*(1-v)),   0.0;
+	} else if (sets == 3 && d == 2) {
+		double v = 0.4;
+		x << 1.0, 0.0,   0.0,     
+		     v, std::sqrt(v*(1-v)),   0.0, 
+		     0.5, 0.0,   0.5;
+	}
 
 	// Output the initial X
 	std::cout << "--------------------------------" << std::endl;
 	std::cout << "      Initial Matrices " << std::endl;;
 	std::cout << "--------------------------------" << std::endl;
+	XCached = X(x, 0);
 	for (int i=0; i<numMeasureB; i++) {
 		for (int j=0; j<numOutcomeB; j++) {
 			int ind = (i*numOutcomeB + j)*d;
 			Eigen::MatrixXcd M = XCached.block(ind, ind, d, d) + 1i*XCached.block(ind+halfP, ind, d, d);
 			std::cout << std::endl;
 			prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
-			std::cout << M.trace() << std::endl;
-			std::cout << (M.adjoint()*M - M).trace() << std::endl;
+			std::cout << std::endl;
+			std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
+			std::cout << "is M PD? = " << isComplexPD(M) << std::endl;
 		}
 	}
-	std::cout << std::endl;
 
 	// Ensure this is an interior point
+	XCached = X(x);
 	if (g(x).squaredNorm() > 1e-8) {
 		std::cerr << "Error - X should start as an interior point (g(x) = " << g(x).squaredNorm() << " > 1-e8)" << std::endl;
 		return 1;
 	}
 	if (!isPD(XCached)) {
-		std::cerr << "Error - X should start as an interior point (not semidefinite)" << std::endl;
+		std::cerr << "Error - X should start as an interior point (X is not semidefinite)" << std::endl;
 		return 1;
 	}
-
-	// TODO
-	return 0;
 
 	// Initialise Z
 	Z = Eigen::MatrixXd::Zero(p, p);
@@ -929,8 +974,30 @@ int main(int argc, char ** argv) {
 			int copyLoc = (i*numOutcomeB + ((j+1) % numOutcomeB)) * d;
 			Z.block(currentLoc,currentLoc,d,d) = XCached.block(copyLoc,copyLoc,d,d);
 			Z.block(currentLoc+halfP,currentLoc+halfP,d,d) = XCached.block(copyLoc,copyLoc,d,d);
+			Z.block(currentLoc+halfP,currentLoc,d,d) = XCached.block(copyLoc+halfP,copyLoc,d,d);
+			Z.block(currentLoc,currentLoc+halfP,d,d) = -XCached.block(copyLoc+halfP,copyLoc,d,d);
 		}
 	}
+
+	// Output the initial Z
+	std::cout << "--------------------------------" << std::endl;
+	std::cout << "      Initial Z " << std::endl;;
+	std::cout << "--------------------------------" << std::endl;
+	for (int i=0; i<numMeasureB; i++) {
+		for (int j=0; j<numOutcomeB; j++) {
+			int ind = (i*numOutcomeB + j)*d;
+			Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
+			std::cout << std::endl;
+			prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
+			std::cout << std::endl;
+			std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
+			std::cout << "is M PD? = " << isComplexPD(M) << std::endl;
+		}
+	}
+
+	std::cout << std::endl;
+	prettyPrint("X dot Z = ", XCached.cwiseProduct(Z).sum());
+	std::cout << std::endl;
 
 	// Cache things
 	Eigen::MatrixXd XInverse = XCached.inverse();
@@ -939,6 +1006,7 @@ int main(int argc, char ** argv) {
 	Eigen::MatrixXd A_0 = delg(x);
 	Eigen::VectorXd delfCached = delf(x);
 	Eigen::VectorXd delLCached = delL(y, Z, delfCached, A_0);
+	double rMagZero = rMag(0, Z, XCached, delLCached, gCached);
 
 	// To prevent reinit each time
 	Eigen::MatrixXd G = Eigen::MatrixXd::Zero(n,n);
@@ -951,8 +1019,22 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd deltay = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd deltaZ = Eigen::MatrixXd::Zero(p, p);
 
+	// Output some initial info
+	std::cout << "----------------------------------" << std::endl;
+	std::cout << "         Initial Info " << std::endl;;
+	std::cout << "----------------------------------" << std::endl;
+	std::cout << "       r(w) = " << rMagZero << " < " << epsilon << std::endl;;
+	std::cout << "      -f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
+	std::cout << "  |delf(x)| = " << delfCached.norm() << std::endl;;
+	std::cout << "       g(x) = " << gCached << std::endl;;
+	std::cout << "  |delg(x)| = " << A_0.norm() << std::endl;;
+	std::cout << "       L(x) = " << -L(x, y, Z) << std::endl;;
+	std::cout << "  |delL(x)| = " << delLCached.norm() << std::endl;;
+
+	// TODO
+	//return 0;
+
 	// Outer loop
-	double rMagZero = 0;
 	double rMagMu = 0;
 	int k = 0;
 	int totalInner = 0;
@@ -966,14 +1048,14 @@ int main(int argc, char ** argv) {
 
 		// Outer-iteration output
 		std::cout << std::endl;
-		std::cout << "--------------------------------" << std::endl;
-		std::cout << "       Iteration " << k << std::endl;;
-		std::cout << "--------------------------------" << std::endl;
+		std::cout << "----------------------------------" << std::endl;
+		std::cout << "         Iteration " << k << std::endl;;
+		std::cout << "----------------------------------" << std::endl;
 		std::cout << "      -f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
 		std::cout << "      -L(x) = " << -L(x, y, Z) << std::endl;;
 		std::cout << "         mu = " << mu << std::endl;;
 		std::cout << "     r(w,0) = " << rMagZero << " ?< " << epsilon << std::endl;;
-		std::cout << "--------------------------------" << std::endl;
+		std::cout << "----------------------------------" << std::endl;
 
 		// Otherwise find the optimum for the current mu
 		double epsilonPrime = M_c * mu;
@@ -1100,9 +1182,9 @@ int main(int argc, char ** argv) {
 
 	// Extract the solution from X
 	std::cout << "" << std::endl;
-	std::cout << "--------------------------------" << std::endl;
-	std::cout << "      Final Matrices " << std::endl;;
-	std::cout << "--------------------------------" << std::endl;
+	std::cout << "----------------------------------" << std::endl;
+	std::cout << "         Final Matrices " << std::endl;;
+	std::cout << "----------------------------------" << std::endl;
 	XCached = X(x, 0);
 	for (int i=0; i<numMeasureB; i++) {
 		for (int j=0; j<numOutcomeB; j++) {
@@ -1115,9 +1197,9 @@ int main(int argc, char ** argv) {
 
 	// Final output
 	std::cout << "" << std::endl;
-	std::cout << "--------------------------------" << std::endl;
-	std::cout << "      Final Output " << std::endl;;
-	std::cout << "--------------------------------" << std::endl;
+	std::cout << "----------------------------------" << std::endl;
+	std::cout << "         Final Output " << std::endl;;
+	std::cout << "----------------------------------" << std::endl;
 	std::cout << "    final r(w) = " << rMagZero << " < " << epsilon << std::endl;;
 	std::cout << "    final f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
 	std::cout << "    final L(w) = " << -L(x, y, Z) << std::endl;;
