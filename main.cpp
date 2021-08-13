@@ -19,24 +19,26 @@ using namespace std::complex_literals;
 int d = 2;
 int sets = 2;
 bool useRandom = false;
+bool useKnown = false;
 
 // Optimisation parameters
-double extraDiag = 0.000001;
-int maxOuterIter = 10000;
-int maxInnerIter = 10000;
+double extraDiag = 0.1;
+int maxOuterIter = 1000000;
+int maxInnerIter = 1000000;
+int maxTotalInner = 1000;
 double muScaling = 10;
 
 // Parameters between 0 and 1
-double gammaVal = 0.01;
+double gammaVal = 0.9;
 double epsilonZero = 0.9;
-double beta = 0.7;
+double beta = 0.9;
 
 // Parameters greater than 0
-double epsilon = 0.001;  // The convergence threshold for the outer
-double M_c = 1000000;    // M_c * mu is the convergence threshold for the inner
-double mu = 1.0;         // This decreases each iteration and affects many things
-double nu = 0.9;         // Affects the merit function
-double rho = 0.5;        // Affects the merit function
+double epsilon = 1e-5; 
+double M_c = 0.1;
+double mu = 1.0;
+double nu = 0.9;
+double rho = 0.5;
 
 // Useful quantities
 int numPerm = 0;
@@ -46,8 +48,8 @@ int numUniquePer = 0;
 int numRealPer = 0;
 int numImagPer = 0;
 int numTotalPer = 0;
-std::vector<Eigen::MatrixXd> As;
-Eigen::MatrixXd B;
+std::vector<Eigen::SparseMatrix<double>> As;
+Eigen::SparseMatrix<double> B;
 
 // Sizes of matrices
 int n = 0;
@@ -57,6 +59,7 @@ int halfP = p / 2;
 
 // For printing
 int precision = 5;
+std::string outputMode = "";
 
 // Pretty print a generic 1D vector
 template <typename type> void prettyPrint(std::string pre, std::vector<type> arr) {
@@ -172,6 +175,29 @@ void prettyPrint(std::string pre, double val) {
 	std::cout << pre << val << std::endl;
 }
 
+// Efficiently calculate the trace of a sparse matrix
+double trace(Eigen::SparseMatrix<double> A) {
+
+	// Start with zero
+	double total = 0;
+
+	// Loop over all non-zero elements
+	for (int k=0; k<A.outerSize(); ++k) {
+		for (Eigen::SparseMatrix<double>::InnerIterator it(A,k); it; ++it) {
+
+			// If it's on the diagonal, add it
+			if (it.row() == it.col()) {
+				total += it.value();
+			}
+
+		}
+	}
+
+	// Return the sum of the diagonal
+	return total;
+
+}
+
 // Function turning X to x
 Eigen::VectorXd Xtox(Eigen::MatrixXd XCached) {
 
@@ -273,7 +299,7 @@ Eigen::MatrixXd XNoB(Eigen::VectorXd x) {
 
 }
 
-// Objective function TODO not working for optimum d2n3 (i.e. imag)
+// Objective function
 double f(Eigen::VectorXd x) {
 
 	// Init the return val
@@ -464,7 +490,7 @@ Eigen::MatrixXd del2f(Eigen::VectorXd x) {
 
 }
 
-// Constraint function
+// Constraint function TODO switch from trace to norm
 Eigen::VectorXd g(Eigen::VectorXd x) {
 
 	// Vector to create
@@ -474,14 +500,15 @@ Eigen::VectorXd g(Eigen::VectorXd x) {
 	Eigen::MatrixXd XCached = X(x, 0.0);
 
 	// Force the measurement to be projective
-	gOutput(0) = XCached.cwiseProduct(XCached).sum() - XCached.trace();
+	//gOutput(0) = XCached.cwiseProduct(XCached).sum() - XCached.trace();
+	gOutput(0) = (XCached*XCached - XCached).norm();
 
 	// Return this vector of things that should be zero
 	return gOutput;
 
 }
 
-// Gradient of the constraint function TODO maybe needs the Bs?
+// Gradient of the constraint function TODO
 Eigen::MatrixXd delg(Eigen::VectorXd x) {
 
 	// Matrix representing the Jacobian of g
@@ -492,7 +519,7 @@ Eigen::MatrixXd delg(Eigen::VectorXd x) {
 
 	// The derivative wrt each x
 	for (int i=0; i<n; i++) {
-		gOutput(0, i) = 2*As[i].cwiseProduct(XCached).sum() - As[i].trace();
+		gOutput(0, i) = 2*As[i].cwiseProduct(XCached).sum() - trace(As[i]);
 	}
 
 	// Return the gradient vector of g
@@ -500,7 +527,7 @@ Eigen::MatrixXd delg(Eigen::VectorXd x) {
 
 }
 
-// Second derivatives of the constraint function if m=1
+// Second derivatives of the constraint function if m=1 TODO
 Eigen::MatrixXd del2g(Eigen::VectorXd x) {
 
 	// Matrix representing the Jacobian of g (should really be n x n x m)
@@ -625,14 +652,17 @@ int main(int argc, char ** argv) {
 			std::cout << "  using a non-linear SDP solver" << std::endl;
 			std::cout << "---------------------------------" << std::endl;
 			std::cout << "                        " << std::endl;
-			std::cout << "    main options          " << std::endl;
+			std::cout << "       main options          " << std::endl;
 			std::cout << " -h               show the help" << std::endl;
 			std::cout << " -d [int]         set the dimension" << std::endl;
 			std::cout << " -n [int]         set the number of measurements" << std::endl;
 			std::cout << " -p [int]         set the precision" << std::endl;
-			std::cout << " -R               use a random intial point" << std::endl;
+			std::cout << " -R               use a random seed" << std::endl;
+			std::cout << " -K               use the ideal if known" << std::endl;
+			std::cout << " -B               output only the iter count for benchmarking" << std::endl;
 			std::cout << "                        " << std::endl;
-			std::cout << "    tolerance options          " << std::endl;
+			std::cout << "    parameter options          " << std::endl;
+			std::cout << " -D [dbl]         set the extra diagonal" << std::endl;
 			std::cout << " -e [dbl]         set epsilon" << std::endl;
 			std::cout << " -E [dbl]         set epsilon_0" << std::endl;
 			std::cout << " -M [dbl]         set M_c" << std::endl;
@@ -642,8 +672,11 @@ int main(int argc, char ** argv) {
 			std::cout << " -s [dbl]         set mu scaling (mu->mu/this)" << std::endl;
 			std::cout << " -r [dbl]         set rho" << std::endl;
 			std::cout << " -g [dbl]         set gamma" << std::endl;
+			std::cout << "                           " << std::endl;
+			std::cout << "      limit options          " << std::endl;
 			std::cout << " -I [int]         set outer iteration limit" << std::endl;
 			std::cout << " -i [int]         set inner iteration limit" << std::endl;
+			std::cout << " -t [int]         set total inner iteration limit" << std::endl;
 			std::cout << "" << std::endl;
 			return 0;
 
@@ -652,9 +685,22 @@ int main(int argc, char ** argv) {
 			d = std::stoi(argv[i+1]);
 			i += 1;
 
+		// Set the max total inner iteration
+		} else if (arg == "-d") {
+			maxTotalInner = std::stoi(argv[i+1]);
+			i += 1;
+
+		// If told to only output the iteration count
+		} else if (arg == "-B") {
+			outputMode = "B";
+
 		// If told to use a random start rather than the default seed
 		} else if (arg == "-R") {
 			useRandom = true;
+
+		// If told to use the known exact solution
+		} else if (arg == "-K") {
+			useKnown = true;
 
 		// Set the number of sets
 		} else if (arg == "-n") {
@@ -674,6 +720,11 @@ int main(int argc, char ** argv) {
 		// Set the mu scaling
 		} else if (arg == "-s") {
 			muScaling = std::stod(argv[i+1]);
+			i += 1;
+
+		// Set the extra diagonal 
+		} else if (arg == "-D") {
+			extraDiag = std::stod(argv[i+1]);
 			i += 1;
 
 		// Set the gamma
@@ -746,12 +797,17 @@ int main(int argc, char ** argv) {
 	p = numMeasureB*numOutcomeB*d*2;
 	halfP = p / 2;
 
-	std::cout << "numUniquePer = " << numUniquePer << std::endl;
-	std::cout << "numRealPer = " << numRealPer << std::endl;
-	std::cout << "numImagPer = " << numImagPer << std::endl;
-	std::cout << "numTotalPer = " << numTotalPer << std::endl;
-	std::cout << "n = " << n << std::endl;
-	std::cout << "p = " << p << std::endl;
+	// Output these so if it crashes you can see how big everything was
+	if (outputMode == "") {
+		std::cout << "--------------------------------" << std::endl;
+		std::cout << "           Size Info  " << std::endl;;
+		std::cout << "--------------------------------" << std::endl;
+		std::cout << "   numUniquePer = " << numUniquePer << std::endl;
+		std::cout << "     numRealPer = " << numRealPer << std::endl;
+		std::cout << "     numImagPer = " << numImagPer << std::endl;
+		std::cout << "              n = " << n << std::endl;
+		std::cout << "              p = " << p << std::endl;
+	}
 
 	// The "ideal" value
 	double maxVal = numPerm*d*std::sqrt(d*(d-1));
@@ -772,30 +828,43 @@ int main(int argc, char ** argv) {
 			for (int l=0; l<numRealPer; l++) {
 
 				// Create a blank p by p matrix
-				Eigen::MatrixXd newAReal = Eigen::MatrixXd::Zero(p, p);
+				Eigen::SparseMatrix<double> newAReal(p, p);
+				std::vector<Eigen::Triplet<double>> trips;
 
-				// Place the real comps in the diagonal blocks
-				newAReal(matLoc+nextX, matLoc+nextY) = 1;
-				newAReal(matLoc+nextY, matLoc+nextX) = 1;
-				newAReal(matLoc+nextX+halfP, matLoc+nextY+halfP) = 1;
-				newAReal(matLoc+nextY+halfP, matLoc+nextX+halfP) = 1;
-
-				// Subtract to force trace one
+				// For the diagonals
 				if (nextX == nextY) {
-					newAReal(matLoc+d-1, matLoc+d-1) = -1;
-					newAReal(matLoc+d-1, matLoc+d-1) = -1;
-					newAReal(matLoc+d-1+halfP, matLoc+d-1+halfP) = -1;
-					newAReal(matLoc+d-1+halfP, matLoc+d-1+halfP) = -1;
-					newAReal(finalMatLoc+d-1, finalMatLoc+d-1) = 1;
-					newAReal(finalMatLoc+halfP+d-1, finalMatLoc+halfP+d-1) = 1;
+
+					// Place the real comps in the diagonal blocks
+					trips.push_back(Eigen::Triplet<double>(matLoc+nextX, matLoc+nextY, 1));
+					trips.push_back(Eigen::Triplet<double>(matLoc+nextX+halfP, matLoc+nextY+halfP, 1));
+
+					// Subtract to force trace one
+					trips.push_back(Eigen::Triplet<double>(matLoc+d-1, matLoc+d-1, -1));
+					trips.push_back(Eigen::Triplet<double>(matLoc+d-1+halfP, matLoc+d-1+halfP, -1));
+					trips.push_back(Eigen::Triplet<double>(finalMatLoc+d-1, finalMatLoc+d-1, 1));
+					trips.push_back(Eigen::Triplet<double>(finalMatLoc+halfP+d-1, finalMatLoc+halfP+d-1, 1));
+
+					// Subtract to force sum to identity
+					trips.push_back(Eigen::Triplet<double>(finalMatLoc+nextX, finalMatLoc+nextY, -1));
+					trips.push_back(Eigen::Triplet<double>(finalMatLoc+nextX+halfP, finalMatLoc+nextY+halfP, -1));
+
+				// For the non-diagonals
+				} else {
+
+					// Place the real comps in the diagonal blocks
+					trips.push_back(Eigen::Triplet<double>(matLoc+nextX, matLoc+nextY, 1));
+					trips.push_back(Eigen::Triplet<double>(matLoc+nextY, matLoc+nextX, 1));
+					trips.push_back(Eigen::Triplet<double>(matLoc+nextX+halfP, matLoc+nextY+halfP, 1));
+					trips.push_back(Eigen::Triplet<double>(matLoc+nextY+halfP, matLoc+nextX+halfP, 1));
+
+					// Subtract to force sum to identity
+					trips.push_back(Eigen::Triplet<double>(finalMatLoc+nextX, finalMatLoc+nextY, -1));
+					trips.push_back(Eigen::Triplet<double>(finalMatLoc+nextY, finalMatLoc+nextX, -1));
+					trips.push_back(Eigen::Triplet<double>(finalMatLoc+nextX+halfP, finalMatLoc+nextY+halfP, -1));
+					trips.push_back(Eigen::Triplet<double>(finalMatLoc+nextY+halfP, finalMatLoc+nextX+halfP, -1));
+
 				}
 				
-				// Subtract to force sum to identity
-				newAReal(finalMatLoc+nextX, finalMatLoc+nextY) = -1;
-				newAReal(finalMatLoc+nextY, finalMatLoc+nextX) = -1;
-				newAReal(finalMatLoc+nextX+halfP, finalMatLoc+nextY+halfP) = -1;
-				newAReal(finalMatLoc+nextY+halfP, finalMatLoc+nextX+halfP) = -1;
-
 				// Move the location along
 				nextX++;
 				if (nextX >= d) {
@@ -804,6 +873,7 @@ int main(int argc, char ** argv) {
 				}
 
 				// Add this matrix to the list
+				newAReal.setFromTriplets(trips.begin(), trips.end());
 				As.push_back(newAReal);
 
 			}
@@ -814,19 +884,23 @@ int main(int argc, char ** argv) {
 			for (int l=0; l<numImagPer; l++) {
 
 				// Create a blank p by p matrix
-				Eigen::MatrixXd newAImag = Eigen::MatrixXd::Zero(p, p);
+				//Eigen::MatrixXd newAImag = Eigen::MatrixXd::Zero(p, p);
+
+				// Create a blank p by p matrix
+				Eigen::SparseMatrix<double> newAImag(p, p);
+				std::vector<Eigen::Triplet<double>> trips;
 
 				// Place the imag comps in the off-diagonal blocks
-				newAImag(matLoc+nextX+halfP, matLoc+nextY) = 1;
-				newAImag(matLoc+nextY, matLoc+nextX+halfP) = 1;
-				newAImag(matLoc+nextX, matLoc+nextY+halfP) = -1;
-				newAImag(matLoc+nextY+halfP, matLoc+nextX) = -1;
+				trips.push_back(Eigen::Triplet<double>(matLoc+nextX+halfP, matLoc+nextY, 1));
+				trips.push_back(Eigen::Triplet<double>(matLoc+nextY, matLoc+nextX+halfP, 1));
+				trips.push_back(Eigen::Triplet<double>(matLoc+nextX, matLoc+nextY+halfP, -1));
+				trips.push_back(Eigen::Triplet<double>(matLoc+nextY+halfP, matLoc+nextX, -1));
 
 				// Subtract to force sum to identity
-				newAImag(finalMatLoc+nextX+halfP, finalMatLoc+nextY) = -1;
-				newAImag(finalMatLoc+nextY, finalMatLoc+nextX+halfP) = -1;
-				newAImag(finalMatLoc+nextX, finalMatLoc+nextY+halfP) = 1;
-				newAImag(finalMatLoc+nextY+halfP, finalMatLoc+nextX) = 1;
+				trips.push_back(Eigen::Triplet<double>(finalMatLoc+nextX+halfP, finalMatLoc+nextY, -1));
+				trips.push_back(Eigen::Triplet<double>(finalMatLoc+nextY, finalMatLoc+nextX+halfP, -1));
+				trips.push_back(Eigen::Triplet<double>(finalMatLoc+nextX, finalMatLoc+nextY+halfP, 1));
+				trips.push_back(Eigen::Triplet<double>(finalMatLoc+nextY+halfP, finalMatLoc+nextX, 1));
 
 				// Move the location along
 				nextX++;
@@ -836,6 +910,7 @@ int main(int argc, char ** argv) {
 				}
 
 				// Add this matrix to the list
+				newAImag.setFromTriplets(trips.begin(), trips.end());
 				As.push_back(newAImag);
 
 			}
@@ -845,27 +920,29 @@ int main(int argc, char ** argv) {
 	}
 
 	// Calculate the B matrix
-	B = Eigen::MatrixXd::Zero(p, p);
+	B = Eigen::SparseMatrix<double>(p, p);
+	std::vector<Eigen::Triplet<double>> tripsB;
 	for (int i=0; i<numMeasureB; i++) {
 		for (int k=0; k<numOutcomeB-1; k++) {
 
 			// The trace of each should be 1
 			int matLoc = (i*numOutcomeB + k) * d;
-			B(matLoc+d-1, matLoc+d-1) = 1;
-			B(matLoc+halfP+d-1, matLoc+halfP+d-1) = 1;
+			tripsB.push_back(Eigen::Triplet<double>(matLoc+d-1, matLoc+d-1, 1));
+			tripsB.push_back(Eigen::Triplet<double>(matLoc+halfP+d-1, matLoc+halfP+d-1, 1));
 
 		}
 
 		// The last of each measurement should be the identity
 		int matLoc = (i*numOutcomeB + numOutcomeB-1) * d;
 		for (int a=0; a<d-1; a++) {
-			B(matLoc+a, matLoc+a) = 1;
-			B(matLoc+halfP+a, matLoc+halfP+a) = 1;
+			tripsB.push_back(Eigen::Triplet<double>(matLoc+a, matLoc+a, 1));
+			tripsB.push_back(Eigen::Triplet<double>(matLoc+halfP+a, matLoc+halfP+a, 1));
 		}
-		B(matLoc+d-1, matLoc+d-1) = 2-d;
-		B(matLoc+halfP+d-1, matLoc+halfP+d-1) = 2-d;
+		tripsB.push_back(Eigen::Triplet<double>(matLoc+d-1, matLoc+d-1, 2-d));
+		tripsB.push_back(Eigen::Triplet<double>(matLoc+halfP+d-1, matLoc+halfP+d-1, 2-d));
 
 	}
+	B.setFromTriplets(tripsB.begin(), tripsB.end());
 
 	// The interior point to optimise
 	Eigen::VectorXd x = Eigen::VectorXd::Zero(n);
@@ -926,32 +1003,36 @@ int main(int argc, char ** argv) {
 	// Extrat the x from this X
 	x = Xtox(XCached);
 
-	// TODO try d2n3 optimum
-	if (sets == 2 && d == 2) {
-		double v = 0.4;
-		x << 1.0, 0.0,   0.0,     
-		     v, std::sqrt(v*(1-v)),   0.0;
-	} else if (sets == 3 && d == 2) {
-		double v = 0.4;
-		x << 1.0, 0.0,   0.0,     
-		     v, std::sqrt(v*(1-v)),   0.0, 
-		     0.5, 0.0,   0.5;
+	// Use optimum if known
+	if (useKnown) {
+		if (sets == 2 && d == 2) {
+			double v = 0.5;
+			x << 1.0, 0.0,   0.0,     
+				 v, std::sqrt(v*(1-v)),   0.0;
+		} else if (sets == 3 && d == 2) {
+			double v = 0.5;
+			x << 1.0, 0.0,   0.0,     
+				 v, std::sqrt(v*(1-v)),   0.0, 
+				 0.5, 0.0,   0.5;
+		}
 	}
 
 	// Output the initial X
-	std::cout << "--------------------------------" << std::endl;
-	std::cout << "      Initial Matrices " << std::endl;;
-	std::cout << "--------------------------------" << std::endl;
-	XCached = X(x, 0);
-	for (int i=0; i<numMeasureB; i++) {
-		for (int j=0; j<numOutcomeB; j++) {
-			int ind = (i*numOutcomeB + j)*d;
-			Eigen::MatrixXcd M = XCached.block(ind, ind, d, d) + 1i*XCached.block(ind+halfP, ind, d, d);
-			std::cout << std::endl;
-			prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
-			std::cout << std::endl;
-			std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
-			std::cout << "is M PD? = " << isComplexPD(M) << std::endl;
+	if (outputMode == "") {
+		std::cout << "--------------------------------" << std::endl;
+		std::cout << "      Initial Matrices " << std::endl;;
+		std::cout << "--------------------------------" << std::endl;
+		XCached = X(x, 0);
+		for (int i=0; i<numMeasureB; i++) {
+			for (int j=0; j<numOutcomeB; j++) {
+				int ind = (i*numOutcomeB + j)*d;
+				Eigen::MatrixXcd M = XCached.block(ind, ind, d, d) + 1i*XCached.block(ind+halfP, ind, d, d);
+				std::cout << std::endl;
+				prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
+				std::cout << std::endl;
+				std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
+				std::cout << "is M PD? = " << isComplexPD(M) << std::endl;
+			}
 		}
 	}
 
@@ -980,24 +1061,25 @@ int main(int argc, char ** argv) {
 	}
 
 	// Output the initial Z
-	std::cout << "--------------------------------" << std::endl;
-	std::cout << "      Initial Z " << std::endl;;
-	std::cout << "--------------------------------" << std::endl;
-	for (int i=0; i<numMeasureB; i++) {
-		for (int j=0; j<numOutcomeB; j++) {
-			int ind = (i*numOutcomeB + j)*d;
-			Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
-			std::cout << std::endl;
-			prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
-			std::cout << std::endl;
-			std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
-			std::cout << "is M PD? = " << isComplexPD(M) << std::endl;
+	if (outputMode == "") {
+		std::cout << "--------------------------------" << std::endl;
+		std::cout << "      Initial Z " << std::endl;;
+		std::cout << "--------------------------------" << std::endl;
+		for (int i=0; i<numMeasureB; i++) {
+			for (int j=0; j<numOutcomeB; j++) {
+				int ind = (i*numOutcomeB + j)*d;
+				Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
+				std::cout << std::endl;
+				prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
+				std::cout << std::endl;
+				std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
+				std::cout << "is M PD? = " << isComplexPD(M) << std::endl;
+			}
 		}
+		std::cout << std::endl;
+		prettyPrint("X dot Z = ", XCached.cwiseProduct(Z).sum());
+		std::cout << std::endl;
 	}
-
-	std::cout << std::endl;
-	prettyPrint("X dot Z = ", XCached.cwiseProduct(Z).sum());
-	std::cout << std::endl;
 
 	// Cache things
 	Eigen::MatrixXd XInverse = XCached.inverse();
@@ -1020,19 +1102,18 @@ int main(int argc, char ** argv) {
 	Eigen::MatrixXd deltaZ = Eigen::MatrixXd::Zero(p, p);
 
 	// Output some initial info
-	std::cout << "----------------------------------" << std::endl;
-	std::cout << "         Initial Info " << std::endl;;
-	std::cout << "----------------------------------" << std::endl;
-	std::cout << "       r(w) = " << rMagZero << " < " << epsilon << std::endl;;
-	std::cout << "      -f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
-	std::cout << "  |delf(x)| = " << delfCached.norm() << std::endl;;
-	std::cout << "       g(x) = " << gCached << std::endl;;
-	std::cout << "  |delg(x)| = " << A_0.norm() << std::endl;;
-	std::cout << "       L(x) = " << -L(x, y, Z) << std::endl;;
-	std::cout << "  |delL(x)| = " << delLCached.norm() << std::endl;;
-
-	// TODO
-	//return 0;
+	if (outputMode == "") {
+		std::cout << "----------------------------------" << std::endl;
+		std::cout << "         Initial Info " << std::endl;;
+		std::cout << "----------------------------------" << std::endl;
+		std::cout << "       r(w) = " << rMagZero << " < " << epsilon << std::endl;;
+		std::cout << "      -f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
+		std::cout << "  |delf(x)| = " << delfCached.norm() << std::endl;;
+		std::cout << "       g(x) = " << gCached << std::endl;;
+		std::cout << "  |delg(x)| = " << A_0.norm() << std::endl;;
+		std::cout << "       L(x) = " << -L(x, y, Z) << std::endl;;
+		std::cout << "  |delL(x)| = " << delLCached.norm() << std::endl;;
+	}
 
 	// Outer loop
 	double rMagMu = 0;
@@ -1047,20 +1128,25 @@ int main(int argc, char ** argv) {
 		}
 
 		// Outer-iteration output
-		std::cout << std::endl;
-		std::cout << "----------------------------------" << std::endl;
-		std::cout << "         Iteration " << k << std::endl;;
-		std::cout << "----------------------------------" << std::endl;
-		std::cout << "      -f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
-		std::cout << "      -L(x) = " << -L(x, y, Z) << std::endl;;
-		std::cout << "         mu = " << mu << std::endl;;
-		std::cout << "     r(w,0) = " << rMagZero << " ?< " << epsilon << std::endl;;
-		std::cout << "----------------------------------" << std::endl;
+		if (outputMode == "") {
+			std::cout << std::endl;
+			std::cout << "----------------------------------" << std::endl;
+			std::cout << "         Iteration " << k << std::endl;;
+			std::cout << "----------------------------------" << std::endl;
+			std::cout << "      -f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
+			std::cout << "      -L(x) = " << -L(x, y, Z) << std::endl;;
+			std::cout << "         mu = " << mu << std::endl;;
+			std::cout << "     r(w,0) = " << rMagZero << " ?< " << epsilon << std::endl;;
+			std::cout << "----------------------------------" << std::endl;
+		}
 
 		// Otherwise find the optimum for the current mu
 		double epsilonPrime = M_c * mu;
 		for (int k2=0; k2<maxInnerIter; k2++) {
 			totalInner++;
+			if (totalInner > maxTotalInner) {
+				break;
+			}
 		
 			// Update the caches
 			XCached = X(x);
@@ -1163,13 +1249,20 @@ int main(int argc, char ** argv) {
 			
 			// Inner-iteration output
 			rMagMu = rMag(mu, Z, XCached, delLCached, gCached);
-			std::cout << "f(x) = " << f(x) << " r = " << rMagMu  << " ?< " << epsilonPrime << " g(x) = " << gCached << std::endl;
+			if (outputMode == "") {
+				std::cout << "f = " << f(x) << " r = " << rMagMu  << " ?< " << epsilonPrime << " g = " << gCached << " df = " << delfCached.norm() << " dg = " << A_0.norm() << std::endl;
+			}
 			
 			// Check if local convergence is reached
 			if (rMagMu <= epsilonPrime) {
 				break;
 			}
 
+		}
+
+		// Stop if the max total inner has been reached
+		if (totalInner > maxTotalInner) {
+			break;
 		}
 
 		// Update mu
@@ -1181,32 +1274,47 @@ int main(int argc, char ** argv) {
 	auto t2 = std::chrono::high_resolution_clock::now();
 
 	// Extract the solution from X
-	std::cout << "" << std::endl;
-	std::cout << "----------------------------------" << std::endl;
-	std::cout << "         Final Matrices " << std::endl;;
-	std::cout << "----------------------------------" << std::endl;
-	XCached = X(x, 0);
-	for (int i=0; i<numMeasureB; i++) {
-		for (int j=0; j<numOutcomeB; j++) {
-			int ind = (i*numOutcomeB + j)*d;
-			Eigen::MatrixXcd M = XCached.block(ind, ind, d, d) + 1i*XCached.block(ind+halfP, ind, d, d);
-			std::cout << std::endl;
-			prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
+	if (outputMode == "") {
+		std::cout << "" << std::endl;
+		std::cout << "----------------------------------" << std::endl;
+		std::cout << "         Final Matrices " << std::endl;;
+		std::cout << "----------------------------------" << std::endl;
+		XCached = X(x, 0);
+		for (int i=0; i<numMeasureB; i++) {
+			for (int j=0; j<numOutcomeB; j++) {
+				int ind = (i*numOutcomeB + j)*d;
+				Eigen::MatrixXcd M = XCached.block(ind, ind, d, d) + 1i*XCached.block(ind+halfP, ind, d, d);
+				std::cout << std::endl;
+				prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
+				std::cout << std::endl;
+				std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
+				std::cout << "is M PD? = " << isComplexPD(M) << std::endl;
+			}
 		}
 	}
 
 	// Final output
-	std::cout << "" << std::endl;
-	std::cout << "----------------------------------" << std::endl;
-	std::cout << "         Final Output " << std::endl;;
-	std::cout << "----------------------------------" << std::endl;
-	std::cout << "    final r(w) = " << rMagZero << " < " << epsilon << std::endl;;
-	std::cout << "    final f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
-	std::cout << "    final L(w) = " << -L(x, y, Z) << std::endl;;
-	std::cout << "    final g(x) = " << gCached << std::endl;;
-	std::cout << "   outer iters = " << k << std::endl;;
-	std::cout << "   total inner = " << totalInner << std::endl;;
-	std::cout << "          time = " << std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count() << " ms" << std::endl;
+	if (outputMode == "") {
+		std::cout << "" << std::endl;
+		std::cout << "----------------------------------" << std::endl;
+		std::cout << "         Final Output " << std::endl;;
+		std::cout << "----------------------------------" << std::endl;
+		std::cout << "         -f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
+		std::cout << "         -L(w) = " << -L(x, y, Z) << std::endl;;
+		std::cout << "          r(w) = " << rMagZero << " < " << epsilon << std::endl;;
+		std::cout << "          g(x) = " << gCached << std::endl;;
+		std::cout << "       delf(w) = " << delfCached.norm() << std::endl;;
+		std::cout << "       delL(w) = " << delLCached.norm() << std::endl;;
+		std::cout << "       delg(w) = " << A_0.norm() << std::endl;;
+		std::cout << "   outer iters = " << k << std::endl;;
+		std::cout << "   total inner = " << totalInner << std::endl;;
+		std::cout << "          time = " << std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count() << " ms" << std::endl;
+
+	// Benchmarking mode
+	} else if (outputMode == "B") {
+		std::cout << totalInner << std::endl;;
+
+	}
 
 	// Everything went fine
 	return 0;
