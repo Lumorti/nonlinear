@@ -18,8 +18,7 @@ using namespace std::complex_literals;
 // Defining the MUB problem
 int d = 2;
 int sets = 2;
-bool useRandom = false;
-bool useKnown = false;
+std::string initMode = "fixed";
 
 // Optimisation parameters
 double extraDiag = 0.1;
@@ -490,7 +489,7 @@ Eigen::MatrixXd del2f(Eigen::VectorXd x) {
 
 }
 
-// Constraint function TODO switch from trace to norm
+// Constraint function TODO
 Eigen::VectorXd g(Eigen::VectorXd x) {
 
 	// Vector to create
@@ -500,8 +499,7 @@ Eigen::VectorXd g(Eigen::VectorXd x) {
 	Eigen::MatrixXd XCached = X(x, 0.0);
 
 	// Force the measurement to be projective
-	//gOutput(0) = XCached.cwiseProduct(XCached).sum() - XCached.trace();
-	gOutput(0) = (XCached*XCached - XCached).norm();
+	gOutput(0) = (XCached*XCached - XCached).squaredNorm();
 
 	// Return this vector of things that should be zero
 	return gOutput;
@@ -516,10 +514,11 @@ Eigen::MatrixXd delg(Eigen::VectorXd x) {
 
 	// Cache the full matrix
 	Eigen::MatrixXd XCached = X(x, 0.0);
+	Eigen::MatrixXd GCached = XCached*XCached - XCached;
 
 	// The derivative wrt each x
 	for (int i=0; i<n; i++) {
-		gOutput(0, i) = 2*As[i].cwiseProduct(XCached).sum() - trace(As[i]);
+		gOutput(0, i) = 2*GCached.cwiseProduct(2*As[i]*XCached - As[i]).sum();
 	}
 
 	// Return the gradient vector of g
@@ -533,10 +532,14 @@ Eigen::MatrixXd del2g(Eigen::VectorXd x) {
 	// Matrix representing the Jacobian of g (should really be n x n x m)
 	Eigen::MatrixXd gOutput = Eigen::MatrixXd::Zero(n, n);
 
+	// Cache the full matrix
+	Eigen::MatrixXd XCached = X(x, 0.0);
+	Eigen::MatrixXd GCached = XCached*XCached - XCached;
+
 	// The derivative wrt each x
 	for (int i=0; i<n; i++) {
 		for (int j=0; j<n; j++) {
-			gOutput(i, j) = 2*As[i].cwiseProduct(As[j]).sum();
+			gOutput(i, j) = 2*((2*As[j]*XCached - As[j]).cwiseProduct(2*As[i]*XCached - As[i]).sum()) + 4*(GCached.cwiseProduct(As[i]*As[j]).sum());
 		}
 	}
 
@@ -656,10 +659,15 @@ int main(int argc, char ** argv) {
 			std::cout << " -h               show the help" << std::endl;
 			std::cout << " -d [int]         set the dimension" << std::endl;
 			std::cout << " -n [int]         set the number of measurements" << std::endl;
+			std::cout << "                        " << std::endl;
+			std::cout << "       output options          " << std::endl;
 			std::cout << " -p [int]         set the precision" << std::endl;
+			std::cout << " -B               output only the iter count for benchmarking" << std::endl;
+			std::cout << "                        " << std::endl;
+			std::cout << "       init options          " << std::endl;
 			std::cout << " -R               use a random seed" << std::endl;
 			std::cout << " -K               use the ideal if known" << std::endl;
-			std::cout << " -B               output only the iter count for benchmarking" << std::endl;
+			std::cout << " -Y               use nearby the ideal if known" << std::endl;
 			std::cout << "                        " << std::endl;
 			std::cout << "    parameter options          " << std::endl;
 			std::cout << " -D [dbl]         set the extra diagonal" << std::endl;
@@ -686,7 +694,7 @@ int main(int argc, char ** argv) {
 			i += 1;
 
 		// Set the max total inner iteration
-		} else if (arg == "-d") {
+		} else if (arg == "-t") {
 			maxTotalInner = std::stoi(argv[i+1]);
 			i += 1;
 
@@ -696,11 +704,15 @@ int main(int argc, char ** argv) {
 
 		// If told to use a random start rather than the default seed
 		} else if (arg == "-R") {
-			useRandom = true;
+			initMode = "random";
 
 		// If told to use the known exact solution
 		} else if (arg == "-K") {
-			useKnown = true;
+			initMode = "exact";
+
+		// If told to use near the known exact
+		} else if (arg == "-Y") {
+			initMode = "nearby";
 
 		// Set the number of sets
 		} else if (arg == "-n") {
@@ -949,72 +961,87 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd y = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd Z = Eigen::MatrixXd::Zero(p, p);
 
+	// The (currently blank) cached form of X(x)
+	Eigen::MatrixXd XCached = Eigen::MatrixXd::Zero(p, p);
+
 	// Seed so it's random each time
-	if (useRandom) {
+	if (initMode == "random") {
 		srand((unsigned int) time(0));
 	}
 
-	// Form the X matrix explicitly, than convert to x
-	Eigen::MatrixXd XCached = Eigen::MatrixXd::Zero(p, p);
+	// If starting with a random matrix (seeded or not)
+	if (initMode == "random" || initMode == "fixed") {
 
-	// For each measurement calculate a set of d rank one POVMs
-	for (int i=0; i<numMeasureB; i++) {
+		// For each measurement calculate a set of d rank one POVMs
+		for (int i=0; i<numMeasureB; i++) {
 
-		// Start with a series of random normalized vectors
-		std::vector<Eigen::VectorXcd> vecs(numOutcomeB, Eigen::VectorXcd::Zero(d));
-		for (int j=0; j<vecs.size(); j++) {
-			vecs[j] = Eigen::VectorXcd::Random(d).normalized();
-		}
-
-		// Keep iterating until self-consistent
-		std::vector<Eigen::MatrixXcd> deltas(numOutcomeB, Eigen::MatrixXcd::Zero(d, d));
-		for (int i=0; i<200; i++) {
-
-			// Calculate the gradient matrices (identity - all the others)
+			// Start with a series of random normalized vectors
+			std::vector<Eigen::VectorXcd> vecs(numOutcomeB, Eigen::VectorXcd::Zero(d));
 			for (int j=0; j<vecs.size(); j++) {
-				deltas[j] = Eigen::MatrixXcd::Identity(d, d);
-				for (int k=0; k<vecs.size(); k++) {
-					if (j == k) {continue;}
-					deltas[j] -= vecs[k] * vecs[k].adjoint();
+				vecs[j] = Eigen::VectorXcd::Random(d).normalized();
+			}
+
+			// Keep iterating until self-consistent
+			std::vector<Eigen::MatrixXcd> deltas(numOutcomeB, Eigen::MatrixXcd::Zero(d, d));
+			for (int i=0; i<200; i++) {
+
+				// Calculate the gradient matrices (identity - all the others)
+				for (int j=0; j<vecs.size(); j++) {
+					deltas[j] = Eigen::MatrixXcd::Identity(d, d);
+					for (int k=0; k<vecs.size(); k++) {
+						if (j == k) {continue;}
+						deltas[j] -= vecs[k] * vecs[k].adjoint();
+					}
 				}
+				
+				// Update everything
+				Eigen::MatrixXcd total = Eigen::MatrixXcd::Identity(d, d);
+				for (int j=0; j<vecs.size(); j++) {
+					vecs[j] = (deltas[j] * vecs[j]).normalized();
+					total -= vecs[j] * vecs[j].adjoint();
+				}
+
+				//std::cout << total.squaredNorm() << std::endl;
+
 			}
-			
-			// Update everything
-			Eigen::MatrixXcd total = Eigen::MatrixXcd::Identity(d, d);
+
+			// Copy them into the big matrix
 			for (int j=0; j<vecs.size(); j++) {
-				vecs[j] = (deltas[j] * vecs[j]).normalized();
-				total -= vecs[j] * vecs[j].adjoint();
+				int ind = (i*numOutcomeB + j) * d;
+				Eigen::MatrixXcd tempMat = vecs[j] * vecs[j].adjoint();
+				XCached.block(ind, ind, d, d) = tempMat.real();
+				XCached.block(ind, ind+halfP, d, d) = tempMat.imag();
 			}
 
-			//std::cout << total.squaredNorm() << std::endl;
-
 		}
 
-		// Copy them into the big matrix
-		for (int j=0; j<vecs.size(); j++) {
-			int ind = (i*numOutcomeB + j) * d;
-			Eigen::MatrixXcd tempMat = vecs[j] * vecs[j].adjoint();
-			XCached.block(ind, ind, d, d) = tempMat.real();
-			XCached.block(ind, ind+halfP, d, d) = tempMat.imag();
-		}
+		// Extrat the x from this X
+		x = Xtox(XCached);
 
-	}
-
-	// Extrat the x from this X
-	x = Xtox(XCached);
-
-	// Use optimum if known
-	if (useKnown) {
+	// Use optimum 
+	} else if (initMode == "exact") {
 		if (sets == 2 && d == 2) {
-			double v = 0.5;
+			x << 1.0, 0.0,   0.0,     
+				 0.5, 0.5,   0.0;
+		} else if (sets == 3 && d == 2) {
+			x << 1.0, 0.0,   0.0,     
+				 0.5, 0.5,   0.0, 
+				 0.5, 0.0,   0.5;
+		}
+
+	// Use nearby the optimum 
+	} else if (initMode == "nearby") {
+		if (sets == 2 && d == 2) {
+			double v = 0.4;
 			x << 1.0, 0.0,   0.0,     
 				 v, std::sqrt(v*(1-v)),   0.0;
 		} else if (sets == 3 && d == 2) {
-			double v = 0.5;
+			double v = 0.4;
 			x << 1.0, 0.0,   0.0,     
 				 v, std::sqrt(v*(1-v)),   0.0, 
 				 0.5, 0.0,   0.5;
 		}
+
 	}
 
 	// Output the initial X
@@ -1038,8 +1065,8 @@ int main(int argc, char ** argv) {
 
 	// Ensure this is an interior point
 	XCached = X(x);
-	if (g(x).squaredNorm() > 1e-8) {
-		std::cerr << "Error - X should start as an interior point (g(x) = " << g(x).squaredNorm() << " > 1-e8)" << std::endl;
+	if (g(x).squaredNorm() > 1e-4) {
+		std::cerr << "Error - X should start as an interior point (g(x) = " << g(x).squaredNorm() << " > 1e-4)" << std::endl;
 		return 1;
 	}
 	if (!isPD(XCached)) {
