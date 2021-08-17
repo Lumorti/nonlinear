@@ -21,10 +21,10 @@ int sets = 2;
 std::string initMode = "fixed";
 
 // Optimisation parameters
-double extraDiag = 0.1;
-int maxOuterIter = 1000000;
-int maxInnerIter = 1000000;
-int maxTotalInner = 1000;
+double extraDiag = 1.0;
+int maxOuterIter =  1000000;
+int maxInnerIter =  1000000;
+int maxTotalInner = 1000000;
 double muScaling = 10;
 
 // Parameters between 0 and 1
@@ -34,7 +34,7 @@ double beta = 0.9;
 
 // Parameters greater than 0
 double epsilon = 1e-5; 
-double M_c = 0.1;
+double M_c = 10000000;
 double mu = 1.0;
 double nu = 0.9;
 double rho = 0.5;
@@ -328,17 +328,10 @@ double f(Eigen::VectorXd x) {
 					// For readability
 					double prodReal = XReal1.cwiseProduct(XReal2).sum();
 					double prodImag = XImag1.cwiseProduct(XImag2).sum();
-					double d = 1.0 - prodReal + prodImag;
-
-					//std::cout << std::endl;
-					//prettyPrint("XReal1 = ", XReal1);
-					//prettyPrint("XReal2 = ", XReal2);
-					//prettyPrint("XImag1 = ", XImag1);
-					//prettyPrint("XImag2 = ", XImag2);
-					//std::cout << prodReal << " " << prodImag << " " << d << std::endl;
+					double den = 1.0 - prodReal + prodImag;
 
 					// Update the value
-					val -= std::sqrt(d);
+					val -= std::sqrt(den);
 
 				}
 			}
@@ -347,7 +340,7 @@ double f(Eigen::VectorXd x) {
 	}
 
 	// Return the function value
-	return val;
+	return val / d;
 
 }
 
@@ -489,7 +482,7 @@ Eigen::MatrixXd del2f(Eigen::VectorXd x) {
 
 }
 
-// Constraint function TODO
+// Constraint function
 Eigen::VectorXd g(Eigen::VectorXd x) {
 
 	// Vector to create
@@ -502,7 +495,7 @@ Eigen::VectorXd g(Eigen::VectorXd x) {
 	gOutput(0) = (XCached*XCached - XCached).squaredNorm();
 
 	// Return this vector of things that should be zero
-	return gOutput;
+	return (1.0/p)*gOutput;
 
 }
 
@@ -522,7 +515,7 @@ Eigen::MatrixXd delg(Eigen::VectorXd x) {
 	}
 
 	// Return the gradient vector of g
-	return gOutput;
+	return (1.0/p)*gOutput;
 
 }
 
@@ -544,7 +537,7 @@ Eigen::MatrixXd del2g(Eigen::VectorXd x) {
 	}
 
 	// Return the gradient vector of g
-	return gOutput;
+	return (1.0/p)*gOutput;
 
 }
 
@@ -822,7 +815,7 @@ int main(int argc, char ** argv) {
 	}
 
 	// The "ideal" value
-	double maxVal = numPerm*d*std::sqrt(d*(d-1));
+	double maxVal = numPerm*std::sqrt(d*(d-1));
 
 	// Calculate the A matrices uses to turn X to x
 	for (int i=0; i<numMeasureB; i++) {
@@ -982,28 +975,28 @@ int main(int argc, char ** argv) {
 			}
 
 			// Keep iterating until self-consistent
-			std::vector<Eigen::MatrixXcd> deltas(numOutcomeB, Eigen::MatrixXcd::Zero(d, d));
-			for (int i=0; i<200; i++) {
+			//std::vector<Eigen::MatrixXcd> deltas(numOutcomeB, Eigen::MatrixXcd::Zero(d, d));
+			//for (int i=0; i<200; i++) {
 
-				// Calculate the gradient matrices (identity - all the others)
-				for (int j=0; j<vecs.size(); j++) {
-					deltas[j] = Eigen::MatrixXcd::Identity(d, d);
-					for (int k=0; k<vecs.size(); k++) {
-						if (j == k) {continue;}
-						deltas[j] -= vecs[k] * vecs[k].adjoint();
-					}
-				}
+				//// Calculate the gradient matrices (identity - all the others)
+				//for (int j=0; j<vecs.size(); j++) {
+					//deltas[j] = Eigen::MatrixXcd::Identity(d, d);
+					//for (int k=0; k<vecs.size(); k++) {
+						//if (j == k) {continue;}
+						//deltas[j] -= vecs[k] * vecs[k].adjoint();
+					//}
+				//}
 				
-				// Update everything
-				Eigen::MatrixXcd total = Eigen::MatrixXcd::Identity(d, d);
-				for (int j=0; j<vecs.size(); j++) {
-					vecs[j] = (deltas[j] * vecs[j]).normalized();
-					total -= vecs[j] * vecs[j].adjoint();
-				}
+				//// Update everything
+				//Eigen::MatrixXcd total = Eigen::MatrixXcd::Identity(d, d);
+				//for (int j=0; j<vecs.size(); j++) {
+					//vecs[j] = (deltas[j] * vecs[j]).normalized();
+					//total -= vecs[j] * vecs[j].adjoint();
+				//}
 
-				//std::cout << total.squaredNorm() << std::endl;
+				//std::cout << "simple " << total.squaredNorm() << std::endl;
 
-			}
+			//}
 
 			// Copy them into the big matrix
 			for (int j=0; j<vecs.size(); j++) {
@@ -1015,8 +1008,19 @@ int main(int argc, char ** argv) {
 
 		}
 
-		// Extrat the x from this X
+		// Extract the x from this X
 		x = Xtox(XCached);
+
+		// Gradient descent TODO
+		for (int i=0; i<10000; i++) {
+			Eigen::VectorXd del = -delg(x).row(0);
+			x += del;
+			double v = g(x)(0);
+			std::cout << "grad " << v << std::endl;
+			if (std::abs(v) < 1e-6) {
+				break;
+			}
+		}
 
 	// Use optimum 
 	} else if (initMode == "exact") {
@@ -1074,18 +1078,19 @@ int main(int argc, char ** argv) {
 		return 1;
 	}
 
-	// Initialise Z
-	Z = Eigen::MatrixXd::Zero(p, p);
-	for (int i=0; i<numMeasureB; i++) {
-		for (int j=0; j<numOutcomeB; j++) {
-			int currentLoc = (i*numOutcomeB + j) * d;
-			int copyLoc = (i*numOutcomeB + ((j+1) % numOutcomeB)) * d;
-			Z.block(currentLoc,currentLoc,d,d) = XCached.block(copyLoc,copyLoc,d,d);
-			Z.block(currentLoc+halfP,currentLoc+halfP,d,d) = XCached.block(copyLoc,copyLoc,d,d);
-			Z.block(currentLoc+halfP,currentLoc,d,d) = XCached.block(copyLoc+halfP,copyLoc,d,d);
-			Z.block(currentLoc,currentLoc+halfP,d,d) = -XCached.block(copyLoc+halfP,copyLoc,d,d);
-		}
-	}
+	// Initialise Z TODO check working for d3+
+	Z = Eigen::MatrixXd::Identity(p, p);
+	//Z = Eigen::MatrixXd::Zero(p, p);
+	//for (int i=0; i<numMeasureB; i++) {
+		//for (int j=0; j<numOutcomeB; j++) {
+			//int currentLoc = (i*numOutcomeB + j) * d;
+			//int copyLoc = (i*numOutcomeB + ((j+1) % numOutcomeB)) * d;
+			//Z.block(currentLoc,currentLoc,d,d) = XCached.block(copyLoc,copyLoc,d,d);
+			//Z.block(currentLoc+halfP,currentLoc+halfP,d,d) = XCached.block(copyLoc,copyLoc,d,d);
+			//Z.block(currentLoc+halfP,currentLoc,d,d) = XCached.block(copyLoc+halfP,copyLoc,d,d);
+			//Z.block(currentLoc,currentLoc+halfP,d,d) = -XCached.block(copyLoc+halfP,copyLoc,d,d);
+		//}
+	//}
 
 	// Output the initial Z
 	if (outputMode == "") {
@@ -1154,6 +1159,11 @@ int main(int argc, char ** argv) {
 			break;
 		}
 
+		// If anything is NaN, stop
+		if (isnan(rMagZero)) {
+			break;
+		}
+
 		// Outer-iteration output
 		if (outputMode == "") {
 			std::cout << std::endl;
@@ -1170,11 +1180,18 @@ int main(int argc, char ** argv) {
 		// Otherwise find the optimum for the current mu
 		double epsilonPrime = M_c * mu;
 		for (int k2=0; k2<maxInnerIter; k2++) {
+
+			// Also make sure the total inner iteration count is valid
 			totalInner++;
 			if (totalInner > maxTotalInner) {
 				break;
 			}
 		
+			// If anything is NaN, stop
+			if (isnan(rMagMu)) {
+				break;
+			}
+
 			// Update the caches
 			XCached = X(x);
 			XInverse = XCached.inverse();
@@ -1279,7 +1296,7 @@ int main(int argc, char ** argv) {
 			if (outputMode == "") {
 				std::cout << "f = " << f(x) << " r = " << rMagMu  << " ?< " << epsilonPrime << " g = " << gCached << " df = " << delfCached.norm() << " dg = " << A_0.norm() << std::endl;
 			}
-			
+
 			// Check if local convergence is reached
 			if (rMagMu <= epsilonPrime) {
 				break;
