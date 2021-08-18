@@ -1,6 +1,4 @@
 nl
-*.log
-*.txt
 
 # Prerequisites
 *.d
