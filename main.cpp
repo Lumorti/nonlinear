@@ -264,10 +264,10 @@ Eigen::VectorXd Xtox(Eigen::MatrixXd XCached) {
 }
 
 // Function turning x to X
-Eigen::MatrixXd X(Eigen::VectorXd x, double extra=extraDiag) {
+Eigen::SparseMatrix<double> X(Eigen::VectorXd x, double extra=extraDiag) {
 
 	// Create a blank p by p matrix
-	Eigen::MatrixXd newX = Eigen::MatrixXd::Zero(p, p);
+	Eigen::SparseMatrix<double> newX(p, p);
 
 	// For each vector element, multiply by the corresponding A
 	for (int i=0; i<n; i++) {
@@ -278,7 +278,7 @@ Eigen::MatrixXd X(Eigen::VectorXd x, double extra=extraDiag) {
 	newX += B;
 
 	// Add a bit extra to make it reversible
-	newX += Eigen::MatrixXd::Identity(p, p) * extra;
+	newX += Eigen::MatrixXd::Identity(p, p).sparseView() * extra;
 	
 	// Return this new matrix
 	return newX;
@@ -286,10 +286,10 @@ Eigen::MatrixXd X(Eigen::VectorXd x, double extra=extraDiag) {
 }
 
 // Function turning x to X without any B addition
-Eigen::MatrixXd XNoB(Eigen::VectorXd x) {
+Eigen::SparseMatrix<double> XNoB(Eigen::VectorXd x) {
 
 	// Create a blank p by p matrix
-	Eigen::MatrixXd newX = Eigen::MatrixXd::Zero(p, p);
+	Eigen::SparseMatrix<double> newX(p, p);
 
 	// For each vector element, multiply by the corresponding A
 	for (int i=0; i<n; i++) {
@@ -302,13 +302,10 @@ Eigen::MatrixXd XNoB(Eigen::VectorXd x) {
 }
 
 // Objective function
-double f(Eigen::VectorXd x) {
+double f(Eigen::SparseMatrix<double> XZero) {
 
 	// Init the return val
 	double val = 0.0;
-
-	// Cache the full matrix
-	Eigen::MatrixXd XCached = X(x, 0.0);
 
 	// For each pair of measurements
 	for (int i=0; i<numMeasureB; i++) {
@@ -323,10 +320,10 @@ double f(Eigen::VectorXd x) {
 					int r2 = (j*numOutcomeB + l) * d;
 
 					// This is very weird unless each block is given its own memory
-					Eigen::MatrixXd XReal1 = XCached.block(r1,r1,d,d);
-					Eigen::MatrixXd XReal2 = XCached.block(r2,r2,d,d);
-					Eigen::MatrixXd XImag1 = XCached.block(r1+halfP,r1,d,d);
-					Eigen::MatrixXd XImag2 = XCached.block(r2,r2+halfP,d,d);
+					Eigen::SparseMatrix<double> XReal1 = XZero.block(r1,r1,d,d);
+					Eigen::SparseMatrix<double> XReal2 = XZero.block(r2,r2,d,d);
+					Eigen::SparseMatrix<double> XImag1 = XZero.block(r1+halfP,r1,d,d);
+					Eigen::SparseMatrix<double> XImag2 = XZero.block(r2,r2+halfP,d,d);
 
 					// For readability
 					double prodReal = XReal1.cwiseProduct(XReal2).sum();
@@ -348,50 +345,51 @@ double f(Eigen::VectorXd x) {
 }
 
 // Gradient of the objective function
-Eigen::VectorXd delf(Eigen::VectorXd x) {
+Eigen::VectorXd delf(Eigen::SparseMatrix<double> XZero) {
 
 	// Init the return val
 	Eigen::VectorXd vals = Eigen::VectorXd::Zero(n);
 
-	// Cache the full matrix
-	Eigen::MatrixXd XCached = X(x, 0.0);
+	// For each pair of measurements
+	for (int i=0; i<numMeasureB; i++) {
+		for (int j=i+1; j<numMeasureB; j++) {
+	
+			// For each outcome of these measurements
+			for (int k=0; k<numOutcomeB; k++) {
+				for (int l=0; l<numOutcomeB; l++) {
 
-	// For each component of the vector
-	for (int b=0; b<n; b++) {
+					// Start locations of the real and imag submatrices
+					int r1 = (i*numOutcomeB + k) * d;
+					int r2 = (j*numOutcomeB + l) * d;
 
-		// For each pair of measurements
-		for (int i=0; i<numMeasureB; i++) {
-			for (int j=i+1; j<numMeasureB; j++) {
-		
-				// For each outcome of these measurements
-				for (int k=0; k<numOutcomeB; k++) {
-					for (int l=0; l<numOutcomeB; l++) {
+					// Extract the blocks for this i, j
+					Eigen::SparseMatrix<double> XReal1 = XZero.block(r1,r1,d,d);
+					Eigen::SparseMatrix<double> XReal2 = XZero.block(r2,r2,d,d);
+					Eigen::SparseMatrix<double> XImag1 = XZero.block(r1+halfP,r1,d,d);
+					Eigen::SparseMatrix<double> XImag2 = XZero.block(r2,r2+halfP,d,d);
 
-						// Start locations of the real and imag submatrices
-						int r1 = (i*numOutcomeB + k) * d;
-						int r2 = (j*numOutcomeB + l) * d;
+					// For readability
+					double prodReal = XReal1.cwiseProduct(XReal2).sum();
+					double prodImag = XImag1.cwiseProduct(XImag2).sum();
+					double den = 1.0 - prodReal + prodImag;
 
-						// This is very weird unless each block is given its own memory
-						Eigen::MatrixXd XReal1 = XCached.block(r1,r1,d,d);
-						Eigen::MatrixXd XReal2 = XCached.block(r2,r2,d,d);
-						Eigen::MatrixXd XImag1 = XCached.block(r1+halfP,r1,d,d);
-						Eigen::MatrixXd XImag2 = XCached.block(r2,r2+halfP,d,d);
-						Eigen::MatrixXd BReal1 = As[b].block(r1,r1,d,d);
-						Eigen::MatrixXd BReal2 = As[b].block(r2,r2,d,d);
-						Eigen::MatrixXd BImag1 = As[b].block(r1+halfP,r1,d,d);
-						Eigen::MatrixXd BImag2 = As[b].block(r2,r2+halfP,d,d);
+					// For each component of the vector
+					for (int b=0; b<n; b++) {
 
-						// For readability
+						// Extract the blocks for this b
+						Eigen::SparseMatrix<double> BReal1 = As[b].block(r1,r1,d,d);
+						Eigen::SparseMatrix<double> BReal2 = As[b].block(r2,r2,d,d);
+						Eigen::SparseMatrix<double> BImag1 = As[b].block(r1+halfP,r1,d,d);
+						Eigen::SparseMatrix<double> BImag2 = As[b].block(r2,r2+halfP,d,d);
+
+						// Components with As[b] and X
 						double LRBX = BReal1.cwiseProduct(XReal2).sum();
 						double RRBX = XReal1.cwiseProduct(BReal2).sum();
 						double LIBX = BImag1.cwiseProduct(XImag2).sum();
 						double RIBX = XImag1.cwiseProduct(BImag2).sum();
-						double prodReal = XReal1.cwiseProduct(XReal2).sum();
-						double prodImag = XImag1.cwiseProduct(XImag2).sum();
-						double d = 1.0 - prodReal + prodImag;
 
 						// Add this inner product of the submatrices
-						vals(b) -= 0.5 * std::pow(d, -0.5) * (-LRBX-RRBX+LIBX+RIBX);
+						vals(b) -= 0.5 * std::pow(den, -0.5) * (-LRBX-RRBX+LIBX+RIBX);
 
 					}
 				}
@@ -406,50 +404,58 @@ Eigen::VectorXd delf(Eigen::VectorXd x) {
 
 }
 
-// Double differential of the objective function
-Eigen::MatrixXd del2f(Eigen::VectorXd x) {
+// Double differential of the objective function TODO 28%
+Eigen::MatrixXd del2f(Eigen::SparseMatrix<double> XZero) {
 
 	// Create an n by n matrix of all zeros
 	Eigen::MatrixXd vals = Eigen::MatrixXd::Zero(n, n);
 
-	// Cache the full matrix
-	Eigen::MatrixXd XCached = X(x, 0.0);
+	// For each pair of measurements
+	for (int i=0; i<numMeasureB; i++) {
+		for (int j=i+1; j<numMeasureB; j++) {
+	
+			// For each outcome of these measurements
+			for (int k=0; k<numOutcomeB; k++) {
+				for (int l=0; l<numOutcomeB; l++) {
 
-	// For each component of the vector
-	for (int b=0; b<n; b++) {
-		for (int c=0; c<n; c++) {
+					// Start locations of the real and imag submatrices
+					int r1 = (i*numOutcomeB + k) * d;
+					int r2 = (j*numOutcomeB + l) * d;
 
-			// For each pair of measurements
-			for (int i=0; i<numMeasureB; i++) {
-				for (int j=i+1; j<numMeasureB; j++) {
-			
-					// For each outcome of these measurements
-					for (int k=0; k<numOutcomeB; k++) {
-						for (int l=0; l<numOutcomeB; l++) {
+					// Extract the blocks for this i, j
+					Eigen::SparseMatrix<double> XReal1 = XZero.block(r1,r1,d,d);
+					Eigen::SparseMatrix<double> XReal2 = XZero.block(r2,r2,d,d);
+					Eigen::SparseMatrix<double> XImag1 = XZero.block(r1+halfP,r1,d,d);
+					Eigen::SparseMatrix<double> XImag2 = XZero.block(r2,r2+halfP,d,d);
 
-							// Start locations of the real and imag submatrices
-							int r1 = (i*numOutcomeB + k) * d;
-							int r2 = (j*numOutcomeB + l) * d;
+					// The original value inside the square root
+					double prodReal = XReal1.cwiseProduct(XReal2).sum();
+					double prodImag = XImag1.cwiseProduct(XImag2).sum();
+					double den = 1.0 - prodReal + prodImag;
 
-							// This is very weird unless each block is given its own memory
-							Eigen::MatrixXd XReal1 = XCached.block(r1,r1,d,d);
-							Eigen::MatrixXd XReal2 = XCached.block(r2,r2,d,d);
-							Eigen::MatrixXd XImag1 = XCached.block(r1+halfP,r1,d,d);
-							Eigen::MatrixXd XImag2 = XCached.block(r2,r2+halfP,d,d);
-							Eigen::MatrixXd BReal1 = As[b].block(r1,r1,d,d);
-							Eigen::MatrixXd BReal2 = As[b].block(r2,r2,d,d);
-							Eigen::MatrixXd BImag1 = As[b].block(r1+halfP,r1,d,d);
-							Eigen::MatrixXd BImag2 = As[b].block(r2,r2+halfP,d,d);
-							Eigen::MatrixXd CReal1 = As[c].block(r1,r1,d,d);
-							Eigen::MatrixXd CReal2 = As[c].block(r2,r2,d,d);
-							Eigen::MatrixXd CImag1 = As[c].block(r1+halfP,r1,d,d);
-							Eigen::MatrixXd CImag2 = As[c].block(r2,r2+halfP,d,d);
+					// For each component of the vector
+					for (int b=0; b<n; b++) {
 
-							// Components with As[b] and X
-							double LRBX = BReal1.cwiseProduct(XReal2).sum();
-							double RRBX = XReal1.cwiseProduct(BReal2).sum();
-							double LIBX = BImag1.cwiseProduct(XImag2).sum();
-							double RIBX = XImag1.cwiseProduct(BImag2).sum();
+						// Extract the blocks for this b
+						Eigen::SparseMatrix<double> BReal1 = As[b].block(r1,r1,d,d);
+						Eigen::SparseMatrix<double> BReal2 = As[b].block(r2,r2,d,d);
+						Eigen::SparseMatrix<double> BImag1 = As[b].block(r1+halfP,r1,d,d);
+						Eigen::SparseMatrix<double> BImag2 = As[b].block(r2,r2+halfP,d,d);
+
+						// Components with As[b] and X
+						double LRBX = BReal1.cwiseProduct(XReal2).sum();
+						double RRBX = XReal1.cwiseProduct(BReal2).sum();
+						double LIBX = BImag1.cwiseProduct(XImag2).sum();
+						double RIBX = XImag1.cwiseProduct(BImag2).sum();
+
+						// For each component of the vector
+						for (int c=0; c<n; c++) {
+
+							// Extract the blocks for this c
+							Eigen::SparseMatrix<double> CReal1 = As[c].block(r1,r1,d,d);
+							Eigen::SparseMatrix<double> CReal2 = As[c].block(r2,r2,d,d);
+							Eigen::SparseMatrix<double> CImag1 = As[c].block(r1+halfP,r1,d,d);
+							Eigen::SparseMatrix<double> CImag2 = As[c].block(r2,r2+halfP,d,d);
 
 							// Components with As[c] and X
 							double LRCX = CReal1.cwiseProduct(XReal2).sum();
@@ -463,13 +469,8 @@ Eigen::MatrixXd del2f(Eigen::VectorXd x) {
 							double LIBC = BImag1.cwiseProduct(CImag2).sum();
 							double RIBC = CImag1.cwiseProduct(BImag2).sum();
 
-							// For readability
-							double prodReal = XReal1.cwiseProduct(XReal2).sum();
-							double prodImag = XImag1.cwiseProduct(XImag2).sum();
-							double d = 1.0 - prodReal + prodImag;
-
 							// Add this inner product of the submatrices
-							vals(b, c) += 0.25 * std::pow(d, -1.5) * (-LRBX-RRBX+LIBX+RIBX) * (-LRCX-RRCX+LICX+RICX) - 0.5 * std::pow(d, -0.5) * (-LRBC-RRBC+LIBC+RIBC);
+							vals(b, c) += 0.25 * std::pow(den, -1.5) * (-LRBX-RRBX+LIBX+RIBX) * (-LRCX-RRCX+LICX+RICX) - 0.5 * std::pow(den, -0.5) * (-LRBC-RRBC+LIBC+RIBC);
 
 						}
 					}
@@ -486,16 +487,13 @@ Eigen::MatrixXd del2f(Eigen::VectorXd x) {
 }
 
 // Constraint function
-Eigen::VectorXd g(Eigen::VectorXd x) {
+Eigen::VectorXd g(Eigen::SparseMatrix<double> XZero) {
 
 	// Vector to create
-	Eigen::VectorXd gOutput = Eigen::VectorXd::Zero(m);
-
-	// Cache the full matrix
-	Eigen::MatrixXd XCached = X(x, 0.0);
+	Eigen::VectorXd gOutput(m);
 
 	// Force the measurement to be projective
-	gOutput(0) = (XCached*XCached - XCached).squaredNorm();
+	gOutput(0) = (XZero*XZero - XZero).squaredNorm();
 
 	// Return this vector of things that should be zero
 	return gScaling*gOutput;
@@ -503,18 +501,17 @@ Eigen::VectorXd g(Eigen::VectorXd x) {
 }
 
 // Gradient of the constraint function
-Eigen::MatrixXd delg(Eigen::VectorXd x) {
+Eigen::MatrixXd delg(Eigen::SparseMatrix<double> XZero) {
 
 	// Matrix representing the Jacobian of g
-	Eigen::MatrixXd gOutput = Eigen::MatrixXd::Zero(m, n);
+	Eigen::MatrixXd gOutput(m, n);
 
-	// Cache the full matrix
-	Eigen::MatrixXd XCached = X(x, 0.0);
-	Eigen::MatrixXd GCached = XCached*XCached - XCached;
+	// Cache X^2-X
+	Eigen::SparseMatrix<double> GCached = XZero*XZero - XZero;
 
 	// The derivative wrt each x
 	for (int i=0; i<n; i++) {
-		gOutput(0, i) = 2*GCached.cwiseProduct(2*As[i]*XCached - As[i]).sum();
+		gOutput(0, i) = 2*GCached.cwiseProduct(2*As[i]*XZero - As[i]).sum();
 	}
 
 	// Return the gradient vector of g
@@ -522,31 +519,31 @@ Eigen::MatrixXd delg(Eigen::VectorXd x) {
 
 }
 
-// Second derivatives of the constraint function if m=1
-Eigen::MatrixXd del2g(Eigen::VectorXd x) {
+// Second derivatives of the constraint function if m=1 TODO 19%
+Eigen::MatrixXd del2g(Eigen::SparseMatrix<double> XZero) {
 
 	// Matrix representing the Jacobian of g (should really be n x n x m)
-	Eigen::MatrixXd gOutput = Eigen::MatrixXd::Zero(n, n);
+	Eigen::MatrixXd gOutput(n, n);
 
-	// Cache the full matrix
-	Eigen::MatrixXd XCached = X(x, 0.0);
-	Eigen::MatrixXd GCached = XCached*XCached - XCached;
+	// Cache X^2-X
+	Eigen::SparseMatrix<double> GCached = XZero*XZero - XZero;
 
 	// The derivative wrt each x
 	for (int i=0; i<n; i++) {
+		Eigen::SparseMatrix<double> AsiXZero = 2*As[i]*XZero - As[i];
 		for (int j=0; j<n; j++) {
-			gOutput(i, j) = 2*((2*As[j]*XCached - As[j]).cwiseProduct(2*As[i]*XCached - As[i]).sum()) + 4*(GCached.cwiseProduct(As[i]*As[j]).sum());
+			gOutput(i, j) = 2*((2*As[j]*XZero - As[j]).cwiseProduct(AsiXZero).sum()) + 4*(GCached.cwiseProduct(As[i]*As[j]).sum());
 		}
 	}
 
-	// Return the gradient vector of g
+	// Return the gradient vector of g, scaled by an arbitrary factor
 	return gScaling*gOutput;
 
 }
 
 // The Lagrangian 
-double L(Eigen::VectorXd x, Eigen::VectorXd y, Eigen::MatrixXd Z) {
-	return f(x) - y.transpose()*g(x) - X(x).cwiseProduct(Z).sum();
+double L(Eigen::SparseMatrix<double> XZero, Eigen::SparseMatrix<double> XCached, Eigen::VectorXd y, Eigen::MatrixXd Z) {
+	return f(XZero) - y.transpose()*g(XZero) - XCached.cwiseProduct(Z).sum();
 }
 
 // Differential of the Lagrangian given individual components
@@ -564,15 +561,15 @@ Eigen::VectorXd delL(Eigen::VectorXd y, Eigen::MatrixXd Z, Eigen::VectorXd delfC
 }
 
 // Double differential of the Lagrangian given an interior point
-Eigen::MatrixXd del2L(Eigen::VectorXd x, Eigen::VectorXd y) {
+Eigen::MatrixXd del2L(Eigen::SparseMatrix<double> XZero, Eigen::VectorXd y) {
 
 	// In our case the second derivative of the A dot Z is zero
-	return del2f(x) - del2g(x)*y(0);
+	return del2f(XZero) - del2g(XZero)*y(0);
 
 }
 
 // Function giving the norm of a point, modified by some mu
-double rMag(double mu, Eigen::MatrixXd Z, Eigen::MatrixXd XCached, Eigen::VectorXd delLCached, Eigen::VectorXd gCached) {
+double rMag(double mu, Eigen::MatrixXd Z, Eigen::SparseMatrix<double> XCached, Eigen::VectorXd delLCached, Eigen::VectorXd gCached) {
 
 	// The left part of the square root
 	Eigen::VectorXd left = Eigen::VectorXd::Zero(n+m);
@@ -590,15 +587,17 @@ double rMag(double mu, Eigen::MatrixXd Z, Eigen::MatrixXd XCached, Eigen::Vector
 }
 
 // The merit function
-double F(Eigen::VectorXd x, Eigen::MatrixXd Z, double mu) {
+double F(Eigen::VectorXd x, Eigen::SparseMatrix<double> ZSparse, double mu) {
 
 	// Cache the X matrix
-	Eigen::MatrixXd XCached = X(x);
-	Eigen::VectorXd gCached = g(x);
+	Eigen::SparseMatrix<double> XCached = X(x);
+	Eigen::SparseMatrix<double> XZero = X(x, 0.0);
+	Eigen::VectorXd gCached = g(XZero);
+	double XDeter = Eigen::MatrixXd(XCached).determinant();
 
 	// Calculate the two components
-	double FBP = f(x) - mu*log(XCached.determinant()) + rho*gCached.norm();
-	double FPD = XCached.cwiseProduct(Z).sum() - mu*std::log(XCached.determinant()*Z.determinant());
+	double FBP = f(XZero) - mu*std::log(XDeter) + rho*gCached.norm();
+	double FPD = XCached.cwiseProduct(ZSparse).sum() - mu*std::log(XDeter);
 
 	// Return the sum
 	return FBP + nu*FPD;
@@ -606,20 +605,14 @@ double F(Eigen::VectorXd x, Eigen::MatrixXd Z, double mu) {
 }
 
 // The change in merit function
-double deltaF(Eigen::VectorXd x, Eigen::VectorXd deltax, Eigen::MatrixXd Z, Eigen::MatrixXd deltaZ, double mu) {
+double deltaF(Eigen::MatrixXd deltaZ, Eigen::SparseMatrix<double> ZInverse, Eigen::SparseMatrix<double> ZSparse, Eigen::SparseMatrix<double> XCached, Eigen::SparseMatrix<double> XInverse, Eigen::VectorXd delfCached, Eigen::VectorXd gCached, Eigen::MatrixXd A_0, Eigen::VectorXd deltax) {
 
-	// Cache the X matrix
-	Eigen::MatrixXd XCached = X(x);
+	// Calculate the deltaX matrix
 	Eigen::MatrixXd deltaX = XNoB(deltax);
-	Eigen::MatrixXd XInverse = XCached.inverse();
-	Eigen::MatrixXd ZInverse = Z.inverse();
-	Eigen::VectorXd delfCached = delf(x);
-	Eigen::VectorXd gCached = g(x);
-	Eigen::MatrixXd A_0 = delg(x);
 
 	// Calculate the two components
 	double FBP = delfCached.dot(deltax) - mu*(XInverse*deltaX).trace() + rho*((gCached+A_0*deltax).norm()-gCached.norm());
-	double FPD = (deltaX*Z + XCached*deltaZ - mu*XInverse*deltaX - mu*ZInverse*deltaZ).trace();
+	double FPD = (deltaX*ZSparse + XCached*deltaZ - mu*XInverse*deltaX - mu*ZInverse*deltaZ).trace();
 
 	// Return the sum
 	return FBP + nu*FPD;
@@ -988,9 +981,12 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd x = Eigen::VectorXd::Zero(n);
 	Eigen::VectorXd y = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd Z = Eigen::MatrixXd::Zero(p, p);
+	Eigen::SparseMatrix<double> ZSparse(p, p);
 
 	// The (currently blank) cached form of X(x)
-	Eigen::MatrixXd XCached = Eigen::MatrixXd::Zero(p, p);
+	Eigen::SparseMatrix<double> XZero(p, p);
+	Eigen::SparseMatrix<double> XCached(p, p);
+	Eigen::MatrixXd XDense = Eigen::MatrixXd::Zero(p, p);
 
 	// Seed so it's random each time
 	if (initMode == "random") {
@@ -1012,14 +1008,14 @@ int main(int argc, char ** argv) {
 
 				// Copy it to the big matrix
 				int ind = (i*numOutcomeB + j) * d;
-				XCached.block(ind, ind, d, d) = tempMat.real();
-				XCached.block(ind, ind+halfP, d, d) = tempMat.imag();
+				XDense.block(ind, ind, d, d) = tempMat.real();
+				XDense.block(ind, ind+halfP, d, d) = tempMat.imag();
 
 			}
 		}
 
 		// Extract the x from this X
-		x = Xtox(XCached);
+		x = Xtox(XDense);
 
 		// If output is allowed
 		if (outputMode == "") {
@@ -1029,11 +1025,11 @@ int main(int argc, char ** argv) {
 		}
 
 		// Gradient descent to make sure we start with an interior point
-		Eigen::VectorXd del = Eigen::VectorXd::Zero(n);
 		double v = 0;
 		for (int i=0; i<10000000; i++) {
-			x += -delg(x).row(0);
-			v = g(x)(0);
+			XZero = X(x, 0.0);
+			x += -delg(XZero).row(0);
+			v = g(XZero)(0);
 			if (outputMode == "") {
 				std::cout << "g(x) = " << v << std::endl;
 			}
@@ -1051,22 +1047,35 @@ int main(int argc, char ** argv) {
 			x << 1.0, 0.0,   0.0,     
 				 0.5, 0.5,   0.0, 
 				 0.5, 0.0,   0.5;
+		} else {
+			std::cerr << "Don't know the exact solution for this problem" << std::endl;
+			return 0;
+
 		}
 
-	// Use nearby the optimum 
+	// Use nearby the optimum TODO copy results from seesaw
 	} else if (initMode == "nearby") {
-		if (sets == 2 && d == 2) {
+		if (d== 2 && sets == 2) {
 			double v = 0.4;
 			x << 1.0, 0.0,   0.0,     
 				 v, std::sqrt(v*(1-v)),   0.0;
-		} else if (sets == 3 && d == 2) {
+		} else if (d == 2 && sets == 3) {
 			double v = 0.4;
 			x << 1.0, 0.0,   0.0,     
 				 v, std::sqrt(v*(1-v)),   0.0, 
 				 0.5, 0.0,   0.5;
+		} else {
+			std::cerr << "Don't have a nearby point for this problem" << std::endl;
+			return 0;
+
 		}
 
 	}
+
+	// Get the full matrices from this
+	XZero = X(x, 0.0);
+	XCached = X(x);
+	XDense = Eigen::MatrixXd(XCached);
 
 	// Output the initial X
 	if (outputMode == "") {
@@ -1074,11 +1083,11 @@ int main(int argc, char ** argv) {
 		std::cout << "--------------------------------" << std::endl;
 		std::cout << "        Initial Matrices        " << std::endl;;
 		std::cout << "--------------------------------" << std::endl;
-		XCached = X(x, 0);
+		Eigen::MatrixXcd M(d, d);
 		for (int i=0; i<numMeasureB; i++) {
 			for (int j=0; j<numOutcomeB; j++) {
 				int ind = (i*numOutcomeB + j)*d;
-				Eigen::MatrixXcd M = XCached.block(ind, ind, d, d) + 1i*XCached.block(ind+halfP, ind, d, d);
+				M = Eigen::MatrixXd(XZero.block(ind, ind, d, d)) + 1i*Eigen::MatrixXd(XZero.block(ind+halfP, ind, d, d));
 				std::cout << std::endl;
 				prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
 				std::cout << std::endl;
@@ -1089,9 +1098,8 @@ int main(int argc, char ** argv) {
 	}
 
 	// Ensure this is an interior point
-	XCached = X(x);
-	if (g(x).squaredNorm() > epsilon/100) {
-		std::cerr << "Error - X should start as an interior point (g(x) = " << g(x).squaredNorm() << " > epsilon)" << std::endl;
+	if (g(XZero).squaredNorm() > epsilon/100) {
+		std::cerr << "Error - X should start as an interior point (g(x) = " << g(XZero).squaredNorm() << " > epsilon)" << std::endl;
 		return 1;
 	}
 	if (!isPD(XCached)) {
@@ -1100,7 +1108,6 @@ int main(int argc, char ** argv) {
 	}
 
 	// Initialise Z
-	XCached = X(x);
 	Z = Eigen::MatrixXd::Zero(p, p);
 	for (int i=0; i<numMeasureB; i++) {
 		for (int j=0; j<numOutcomeB; j++) {
@@ -1131,18 +1138,17 @@ int main(int argc, char ** argv) {
 		prettyPrint("X dot Z = ", XCached.cwiseProduct(Z).sum());
 	}
 
-	// Cache things
-	Eigen::MatrixXd XInverse = XCached.inverse();
-	Eigen::MatrixXd ZInverse = Z.inverse();
-	Eigen::MatrixXd gCached = g(x);
-	Eigen::MatrixXd A_0 = delg(x);
-	Eigen::VectorXd delfCached = delf(x);
+	// Init some thing that are used for the first calcs
+	Eigen::SparseMatrix<double> XInverse = XDense.inverse().sparseView();
+	Eigen::SparseMatrix<double> ZInverse = Z.inverse().sparseView();
+	Eigen::MatrixXd gCached = g(XZero);
+	Eigen::MatrixXd A_0 = delg(XZero);
+	Eigen::VectorXd delfCached = delf(XZero);
 	Eigen::VectorXd delLCached = delL(y, Z, delfCached, A_0);
 	double rMagZero = rMag(0, Z, XCached, delLCached, gCached);
 
 	// To prevent reinit each time
-	Eigen::MatrixXd G = Eigen::MatrixXd::Zero(n,n);
-	Eigen::MatrixXd T = Eigen::MatrixXd::Zero(n, n);
+	Eigen::MatrixXd G = Eigen::MatrixXd::Zero(n, n);
 	Eigen::MatrixXd H = Eigen::MatrixXd::Zero(n, n);
 	Eigen::VectorXd AStarXInverse = Eigen::VectorXd::Zero(n);
 	Eigen::MatrixXd GHInverse = Eigen::MatrixXd::Zero(n, n);
@@ -1174,8 +1180,8 @@ int main(int argc, char ** argv) {
 			std::cout << "----------------------------------" << std::endl;
 			std::cout << "         Iteration " << k << std::endl;;
 			std::cout << "----------------------------------" << std::endl;
-			std::cout << "      -f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
-			std::cout << "      -L(x) = " << -L(x, y, Z) << std::endl;;
+			std::cout << "      -f(x) = " << -f(XZero) << " <= " << maxVal << std::endl;;
+			std::cout << "      -L(x) = " << -L(XZero, XCached, y, Z) << std::endl;;
 			std::cout << "         mu = " << mu << std::endl;;
 			std::cout << "     r(w,0) = " << rMagZero << " ?< " << epsilon << std::endl;;
 			std::cout << "----------------------------------" << std::endl;
@@ -1198,21 +1204,21 @@ int main(int argc, char ** argv) {
 
 			// Update the caches
 			XCached = X(x);
-			XInverse = XCached.inverse();
-			ZInverse = Z.inverse();
-			gCached = g(x);
-			A_0 = delg(x);
-			delfCached = delf(x);
+			XZero = X(x, 0.0);
+			XDense = Eigen::MatrixXd(XCached);
+			ZSparse = Z.sparseView();
+			XInverse = XDense.inverse().sparseView();
+			ZInverse = Z.inverse().sparseView();
+			gCached = g(XZero);
+			A_0 = delg(XZero);
+			delfCached = delf(XZero);
 			delLCached = delL(y, Z, delfCached, A_0);
 
-			// Update T, the scaling matrix
-			T = XCached.pow(-0.5);
-
 			// Update G
-			G = del2L(x, y);
+			G = del2L(XZero, y);
 
 			// See if G is already PD
-			if (isPD(G)) {
+			if (!isPD(G)) {
 
 				// If G-sigma*I is PD
 				double sigma = 1;
@@ -1243,19 +1249,18 @@ int main(int argc, char ** argv) {
 			}	
 
 			// Construct H
-			for (int i=0; i<n; i++) {
-				for (int j=0; j<n; j++) {
-					H(i,j) = (As[i]*XInverse*As[j]*Z).trace();
+			for (int j=0; j<n; j++) {
+				Eigen::SparseMatrix<double> cached = XInverse*As[j]*ZSparse;
+				for (int i=0; i<n; i++) {
+					H(i,j) = trace(As[i]*cached); // TODO 7%
 				}
 			}
 
-			// Calculate a few useful properties
+			// Calculate/cache a few useful matrices 
 			GHInverse = (G + H).inverse();
 			for (int i=0; i<n; i++) {
 				AStarXInverse(i) = As[i].cwiseProduct(XInverse).sum();
 			}
-
-			// TODO profile and optimise
 
 			// Calculate the x and y by solving system of linear equations
 			Eigen::MatrixXd leftMat = Eigen::MatrixXd::Zero(n+m, n+m);
@@ -1277,7 +1282,7 @@ int main(int argc, char ** argv) {
 			// Determine the max l such that beta^l = 1e-9
 			int maxL = std::log(epsilon) / std::log(beta);
 
-			// Calculate optimal step size using a line search
+			// Get a base step size using the min eigenvalues TODO eigenvalues 15%
 			double alphaBarX = -gammaVal / std::real((XInverse * deltaX).eigenvalues()[0]);
 			double alphaBarZ = -gammaVal / std::real((ZInverse * deltaZ).eigenvalues()[0]);
 			if (alphaBarX < 0) {
@@ -1287,11 +1292,15 @@ int main(int argc, char ** argv) {
 				alphaBarZ = 1;
 			}
 			double alphaBar = std::min(std::min(alphaBarX, alphaBarZ), 1.0);
+
+			// Calculate optimal step size using a line search (TODO F 5%)
 			double alpha;
 			int l;
+			double FCached = F(x, ZSparse, mu);
+			double deltaFCached = deltaF(deltaZ, ZInverse, ZSparse, XCached, XInverse, delfCached, gCached, A_0, deltax);
 			for (l=0; l<maxL; l++){
 				alpha = alphaBar * std::pow(beta, l);
-				if (F(x+alpha*deltax, Z+alpha*deltaZ, mu) <= F(x, Z, mu) + epsilonZero*alpha*deltaF(x, deltax, Z, deltaZ, mu) && isPD(X(x+alpha*deltax))) {
+				if (F(x+alpha*deltax, ZSparse+alpha*deltaZ, mu) <= FCached + epsilonZero*alpha*deltaFCached && isPD(X(x+alpha*deltax))) {
 					break;
 				}
 			}
@@ -1304,7 +1313,7 @@ int main(int argc, char ** argv) {
 			// Inner-iteration output
 			rMagMu = rMag(mu, Z, XCached, delLCached, gCached);
 			if (outputMode == "") {
-				std::cout << "f = " << f(x) << " r = " << rMagMu  << " ?< " << epsilonPrime << " g = " << gCached << " df = " << delfCached.norm() << " dg = " << A_0.norm() << std::endl;
+				std::cout << "f = " << f(XZero) << " r = " << rMagMu  << " ?< " << epsilonPrime << " g = " << gCached << " df = " << delfCached.norm() << " dg = " << A_0.norm() << std::endl;
 			}
 
 			// Check if local convergence is reached
@@ -1333,11 +1342,12 @@ int main(int argc, char ** argv) {
 		std::cout << "----------------------------------" << std::endl;
 		std::cout << "         Final Matrices " << std::endl;;
 		std::cout << "----------------------------------" << std::endl;
-		XCached = X(x, 0);
+		XZero = X(x, 0);
+		Eigen::MatrixXcd M(d, d);
 		for (int i=0; i<numMeasureB; i++) {
 			for (int j=0; j<numOutcomeB; j++) {
 				int ind = (i*numOutcomeB + j)*d;
-				Eigen::MatrixXcd M = XCached.block(ind, ind, d, d) + 1i*XCached.block(ind+halfP, ind, d, d);
+				M = Eigen::MatrixXd(XZero.block(ind, ind, d, d)) + 1i*Eigen::MatrixXd(XZero.block(ind+halfP, ind, d, d));
 				std::cout << std::endl;
 				prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
 				std::cout << std::endl;
@@ -1353,8 +1363,8 @@ int main(int argc, char ** argv) {
 		std::cout << "----------------------------------" << std::endl;
 		std::cout << "         Final Output " << std::endl;;
 		std::cout << "----------------------------------" << std::endl;
-		std::cout << "         -f(x) = " << -f(x) << " <= " << maxVal << std::endl;;
-		std::cout << "         -L(w) = " << -L(x, y, Z) << std::endl;;
+		std::cout << "         -f(x) = " << -f(XZero) << " <= " << maxVal << std::endl;;
+		std::cout << "         -L(w) = " << -L(XZero, XCached, y, Z) << std::endl;;
 		std::cout << "          r(w) = " << rMagZero << " < " << epsilon << std::endl;;
 		std::cout << "          g(x) = " << gCached << std::endl;;
 		std::cout << "       delf(w) = " << delfCached.norm() << std::endl;;
