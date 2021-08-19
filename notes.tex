@@ -91,6 +91,32 @@ Note that in the above expressions many of these terms are zero, for instance $C
 
 Computationally many things here are different, such that $X$ is only ever calculated once per iteration and the extraction matrices are unneeded, instead the submatrices are extracted directly from the cached $X$ using Eigen's ``X.block()'' routine, which claims $O(0)$ scaling when compiled with optimisations.
 
+In order to enforce that the measurements are projectors we define the constraint function $g(x)$:
+
+\begin{align}
+	G(x) &= X^2 - X \\
+	&= \left(\sum_i A_i x_i + B\right)^2 - \sum_i A_i x_i - B \\
+	\\
+	g(x) &= |G(x)|^2 \\
+	&= G(x) \cdot G(x)
+\end{align}
+
+And its first derivative:
+
+\begin{align}
+	\frac{\partial g(x)}{\partial x_b} &= 2 G(x) \cdot \frac{\partial G(x)}{\partial x_b} \\
+									   &= 2 (X^2 - X) \cdot (2 A_b X - A_b)
+\end{align}
+
+And its second derivative:
+
+\begin{align}
+\frac{\partial^2 g(x)}{\partial x_b \partial x_c} &= \frac{\partial}{\partial x_c} 2 (X^2 - X) \cdot (2 A_b X - A_b) \\
+												  &= \left[ \frac{\partial}{\partial x_c} 2 (X^2 - X) \right] \cdot (2 A_b X - A_b) +  2 (X^2 - X) \cdot \left[ \frac{\partial}{\partial x_c} (2 A_b X - A_b) \right] \\
+												  &= \left[ 2 (2 A_c X - A_c) \right] \cdot (2 A_b X - A_b) +  2 (X^2 - X) \cdot \left[ 2 A_b A_c \right] \\
+												  &= 2 ~ (2 A_c X - A_c) \cdot (2 A_b X - A_b) +  4 (X^2 - X) \cdot A_b A_c 
+\end{align}
+
 Putting these all together we can construct the Lagrangian and it's first/second derivatives, which are then used as in the paper.
 
 
