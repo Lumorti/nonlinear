@@ -9,6 +9,9 @@
 // Allow use of "2i" for complex
 using namespace std::complex_literals;
 
+// For openmp 
+#include <omp.h>
+
 // Eigen
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
@@ -19,16 +22,18 @@ using namespace std::complex_literals;
 int d = 2;
 int sets = 2;
 std::string initMode = "fixed";
+bool useBFGS = false;
 
 // Optimisation parameters
-double extraDiag = 10.0;
-int maxOuterIter =  100000000;
-int maxInnerIter =  100000000;
-int maxTotalInner = 100000000;
+double extraDiag = 1.0;
+long int maxOuterIter =  1000000000;
+long int maxInnerIter =  1000000000;
+long int maxTotalInner = 1000000000;
 double muScaling = 10;
 double fScaling = 1.00;
-double gScaling = 0.00001;
+double gScaling = 0.001;
 double gThresh = 1e-8;
+int numCores = 1;
 
 // Parameters between 0 and 1
 double gammaVal = 0.9;
@@ -37,7 +42,7 @@ double beta = 0.1;
 
 // Parameters greater than 0
 double epsilon = 1e-5; 
-double M_c = 10000000;
+double M_c = 1e10;
 double mu = 1.0;
 double nu = 0.9;
 double rho = 0.5;
@@ -511,6 +516,7 @@ Eigen::MatrixXd delg(Eigen::SparseMatrix<double> XZero) {
 	Eigen::SparseMatrix<double> GCached = XZero*XZero - XZero;
 
 	// The derivative wrt each x
+    #pragma omp parallel for
 	for (int i=0; i<n; i++) {
 		gOutput(0, i) = 2*GCached.cwiseProduct(2*As[i]*XZero - As[i]).sum();
 	}
@@ -520,7 +526,7 @@ Eigen::MatrixXd delg(Eigen::SparseMatrix<double> XZero) {
 
 }
 
-// Second derivatives of the constraint function if m=1 TODO 10%
+// Second derivatives of the constraint function if m=1
 Eigen::MatrixXd del2g(Eigen::SparseMatrix<double> XZero) {
 
 	// Matrix representing the Jacobian of g (should really be n x n x m)
@@ -651,6 +657,8 @@ int main(int argc, char ** argv) {
 			std::cout << " -h               show the help" << std::endl;
 			std::cout << " -d [int]         set the dimension" << std::endl;
 			std::cout << " -n [int]         set the number of measurements" << std::endl;
+			std::cout << " -c [int]         set how many cores to use" << std::endl;
+			std::cout << " -B               use the BFGS update method" << std::endl;
 			std::cout << "                        " << std::endl;
 			std::cout << "       output options          " << std::endl;
 			std::cout << " -p [int]         set the precision" << std::endl;
@@ -658,23 +666,22 @@ int main(int argc, char ** argv) {
 			std::cout << "                        " << std::endl;
 			std::cout << "       init options          " << std::endl;
 			std::cout << " -R               use a random seed" << std::endl;
-			std::cout << " -K               use the ideal if known" << std::endl;
 			std::cout << " -Y               use nearby the ideal if known" << std::endl;
 			std::cout << " -T [dbl]         set the threshold for the initial g(x)" << std::endl;
 			std::cout << "                        " << std::endl;
 			std::cout << "    parameter options          " << std::endl;
-			std::cout << " -D [dbl]         set the extra diagonal" << std::endl;
 			std::cout << " -e [dbl]         set epsilon" << std::endl;
-			std::cout << " -E [dbl]         set epsilon_0" << std::endl;
 			std::cout << " -M [dbl]         set M_c" << std::endl;
 			std::cout << " -b [dbl]         set beta" << std::endl;
-			std::cout << " -N [dbl]         set nu" << std::endl;
-			std::cout << " -m [dbl]         set initial mu" << std::endl;
-			std::cout << " -s [dbl]         set mu scaling (mu->mu/this)" << std::endl;
-			std::cout << " -r [dbl]         set rho" << std::endl;
-			std::cout << " -g [dbl]         set gamma" << std::endl;
 			std::cout << " -G [dbl]         set the factor of g(x)" << std::endl;
+			std::cout << " -D [dbl]         set the extra diagonal" << std::endl;
+			std::cout << " -g [dbl]         set gamma" << std::endl;
+			std::cout << " -s [dbl]         set mu scaling (mu->mu/this)" << std::endl;
+			std::cout << " -m [dbl]         set initial mu" << std::endl;
+			std::cout << " -E [dbl]         set epsilon_0" << std::endl;
 			std::cout << " -F [dbl]         set the factor of f(x)" << std::endl;
+			std::cout << " -r [dbl]         set rho" << std::endl;
+			std::cout << " -N [dbl]         set nu" << std::endl;
 			std::cout << "                           " << std::endl;
 			std::cout << "      limit options          " << std::endl;
 			std::cout << " -I [int]         set outer iteration limit" << std::endl;
@@ -686,6 +693,15 @@ int main(int argc, char ** argv) {
 		// Set the number of measurements 
 		} else if (arg == "-d") {
 			d = std::stoi(argv[i+1]);
+			i += 1;
+
+		// Use the BFGS update method
+		} else if (arg == "-B") {
+			useBFGS = true;
+
+		// Set the number of cores 
+		} else if (arg == "-c") {
+			numCores = std::stoi(argv[i+1]);
 			i += 1;
 
 		// Set the max total inner iteration
@@ -700,10 +716,6 @@ int main(int argc, char ** argv) {
 		// If told to use a random start rather than the default seed
 		} else if (arg == "-R") {
 			initMode = "random";
-
-		// If told to use the known exact solution
-		} else if (arg == "-K") {
-			initMode = "exact";
 
 		// If told to use near the known exact
 		} else if (arg == "-Y") {
@@ -798,6 +810,9 @@ int main(int argc, char ** argv) {
 
 	}
 
+	// Tell openmp the number of cores to use
+	omp_set_num_threads(numCores);
+
 	// Output formatting
 	std::cout << std::setprecision(precision);
 
@@ -825,10 +840,9 @@ int main(int argc, char ** argv) {
 		std::cout << "          System Info           " << std::endl;;
 		std::cout << "--------------------------------" << std::endl;
 		std::cout << "               d = " << d << std::endl;
-		std::cout << "            sets = " << sets << std::endl;
+		std::cout << "               n = " << sets << std::endl;
 		std::cout << "  size of vector = " << n << std::endl;
-		std::cout << "  size of matrix = " << p << " x " << p << std::endl;
-		std::cout << "                 ~ " << p*p*16 / (1024*1024) << " MB "<< std::endl;
+		std::cout << "  size of matrix = " << p << " x " << p << " ~ " << p*p*16 / (1024*1024) << " MB " << std::endl;
 		std::cout << "         epsilon = " << epsilon << std::endl;
 		std::cout << "       epsilon_0 = " << epsilonZero << std::endl;
 		std::cout << "     g(x) thresh = " << gThresh << std::endl;
@@ -1027,52 +1041,299 @@ int main(int argc, char ** argv) {
 			std::cout << "--------------------------------" << std::endl;
 		}
 
-		// Gradient descent to make sure we start with an interior point
-		double v = 0;
-		for (int i=0; i<10000000; i++) {
-			XZero = X(x, 0.0);
-			x += -delg(XZero).row(0);
-			v = g(XZero)(0) / gScaling;
-			if (outputMode == "") {
-				std::cout << "g(x) = " << v << std::endl;
-			}
-			if (v < gThresh) {
-				break;
-			}
-		}
-
-	// Use optimum 
-	} else if (initMode == "exact") {
-		if (sets == 2 && d == 2) {
-			x << 1.0, 0.0,   0.0,     
-				 0.5, 0.5,   0.0;
-		} else if (sets == 3 && d == 2) {
-			x << 1.0, 0.0,   0.0,     
-				 0.5, 0.5,   0.0, 
-				 0.5, 0.0,   0.5;
-		} else {
-			std::cerr << "Don't know the exact solution for this problem" << std::endl;
-			return 0;
-
-		}
-
-	// Use nearby the optimum TODO copy results from seesaw
+	// Use nearby the optimum
 	} else if (initMode == "nearby") {
-		if (d== 2 && sets == 2) {
-			double v = 0.4;
-			x << 1.0, 0.0,   0.0,     
-				 v, std::sqrt(v*(1-v)),   0.0;
+
+		// Allow entry as the list of matrices
+		std::vector<std::vector<std::vector<std::complex<double>>>> Ms(numMeasureB*numOutcomeB);
+
+		// From the seesaw
+		if (d == 2 && sets == 2) {
+			Ms[0] = { { 1.0, 0.0 }, 
+					  { 0.0, 0.0 } };
+			Ms[1] = { { 0.0, 0.0 }, 
+					  { 0.0, 1.0 } };
+			Ms[2] = { { 0.5, 0.5 }, 
+					  { 0.5, 0.5 } };
+			Ms[3] = { { 0.5,-0.5 }, 
+					  {-0.5, 0.5 } };
 		} else if (d == 2 && sets == 3) {
-			double v = 0.4;
-			x << 1.0, 0.0,   0.0,     
-				 v, std::sqrt(v*(1-v)),   0.0, 
-				 0.5, 0.0,   0.5;
+			Ms[0] = { { 1.0, 0.0 }, 
+					  { 0.0, 0.0 } };
+			Ms[1] = { { 0.0, 0.0 }, 
+					  { 0.0, 1.0 } };
+			Ms[2] = { { 0.5,-0.5 }, 
+					  {-0.5, 0.5 } };
+			Ms[3] = { { 0.5, 0.5 }, 
+					  { 0.5, 0.5 } };
+			Ms[4] = { {  0.5, 0.5i }, 
+					  {-0.5i, 0.5 } };
+			Ms[5] = { {  0.5,-0.5i }, 
+					  { 0.5i, 0.5 } };
+		} else if (d == 2 && sets == 4) {
+			Ms[0] = { {  0.90+0.00i,  0.15+0.26i },
+				      {  0.15-0.26i,  0.10+0.00i } };
+		    Ms[1] = { {  0.10+0.00i, -0.15-0.26i },
+				      { -0.15+0.26i,  0.90+0.00i } };
+		    Ms[2] = { {  0.58+0.00i, -0.46-0.18i },
+				      { -0.46+0.18i,  0.42+0.00i } };
+		    Ms[3] = { {  0.42+0.00i,  0.46+0.18i },
+				      {  0.46-0.18i,  0.58+0.00i } };
+		    Ms[4] = { {  0.10+0.00i, -0.01+0.30i },
+				      { -0.01-0.30i,  0.90+0.00i } };
+		    Ms[5] = { {  0.90+0.00i,  0.01-0.30i },
+				      {  0.01+0.30i,  0.10+0.00i } };
+		    Ms[6] = { {  0.58+0.00i, -0.31+0.38i },
+		 		      { -0.31-0.38i,  0.42+0.00i } };
+		    Ms[7] = { {  0.42+0.00i,  0.31-0.38i },
+				      {  0.31+0.38i,  0.58+0.00i } };
+		} else if (d == 4 && sets == 4) {
+			Ms[0] = {  {  0.39+0.00i, -0.29-0.12i,  0.16+0.26i,  0.17-0.14i },
+					   { -0.29+0.12i,  0.25+0.00i, -0.20-0.14i, -0.08+0.15i },
+					   {  0.16-0.26i, -0.20+0.14i,  0.24+0.00i, -0.02-0.17i },
+					   {  0.17+0.14i, -0.08-0.15i, -0.02+0.17i,  0.12+0.00i } };
+			Ms[1] = {  {  0.24+0.00i,  0.27+0.26i,  0.03+0.10i,  0.05+0.17i },
+                       {  0.27-0.26i,  0.59+0.00i,  0.14+0.07i,  0.24+0.14i },
+                       {  0.03-0.10i,  0.14-0.07i,  0.04+0.00i,  0.08+0.00i },
+                       {  0.05-0.17i,  0.24-0.14i,  0.08-0.00i,  0.13+0.00i }  };
+			Ms[2] = {  {  0.11+0.00i, -0.06-0.11i,  0.08-0.15i, -0.10+0.20i },
+					   { -0.06+0.11i,  0.14+0.00i,  0.11+0.16i, -0.15-0.21i },
+                       {  0.08+0.15i,  0.11-0.16i,  0.27+0.00i, -0.36+0.01i },
+                       { -0.10-0.20i, -0.15+0.21i, -0.36-0.01i,  0.49+0.00i } };
+			Ms[3] = {  {  0.27+0.00i,  0.07-0.03i, -0.28-0.21i, -0.12-0.23i },
+					   {  0.07+0.03i,  0.02+0.00i, -0.05-0.09i, -0.00-0.08i },
+					   { -0.28+0.21i, -0.05+0.09i,  0.45+0.00i,  0.31+0.15i },
+                       { -0.12+0.23i, -0.00+0.08i,  0.31-0.15i,  0.26+0.00i } };
+			Ms[4] = {  {  0.10+0.00i, -0.18-0.07i,  0.02+0.10i, -0.21-0.02i },
+                       { -0.18+0.07i,  0.37+0.00i, -0.11-0.16i,  0.38-0.11i },
+                       {  0.02-0.10i, -0.11+0.16i,  0.10+0.00i, -0.07+0.20i },
+                       { -0.21+0.02i,  0.38+0.11i, -0.07-0.20i,  0.43+0.00i } };
+			Ms[5] = {  {  0.26+0.00i,  0.09-0.12i,  0.38-0.12i,  0.08-0.05i },
+                       {  0.09+0.12i,  0.09+0.00i,  0.19+0.14i,  0.05+0.02i },
+                       {  0.38+0.12i,  0.19-0.14i,  0.62+0.00i,  0.15-0.04i },
+                       {  0.08+0.05i,  0.05-0.02i,  0.15+0.04i,  0.04+0.00i } };
+			Ms[6] = {  {  0.06+0.00i,  0.07+0.17i, -0.01-0.02i, -0.08-0.13i },
+                       {  0.07-0.17i,  0.54+0.00i, -0.06-0.00i, -0.45+0.08i },
+                       { -0.01+0.02i, -0.06+0.00i,  0.01+0.00i,  0.05-0.01i },
+                       { -0.08+0.13i, -0.45-0.08i,  0.05+0.01i,  0.39+0.00i } };
+			Ms[7] = {  {  0.58+0.00i,  0.03+0.02i, -0.40+0.04i,  0.21+0.20i },
+                       {  0.03-0.02i,  0.00+0.00i, -0.02+0.02i,  0.02+0.00i },
+                       { -0.40-0.04i, -0.02-0.02i,  0.27+0.00i, -0.13-0.15i },
+                       {  0.21-0.20i,  0.02-0.00i, -0.13+0.15i,  0.15+0.00i } };
+			Ms[8] = {  {  0.30+0.00i, -0.39+0.02i, -0.13-0.18i, -0.03-0.05i },
+                       { -0.39-0.02i,  0.52+0.00i,  0.16+0.25i,  0.04+0.07i },
+                       { -0.13+0.18i,  0.16-0.25i,  0.17+0.00i,  0.05+0.00i },
+                       { -0.03+0.05i,  0.04-0.07i,  0.05-0.00i,  0.01+0.00i } };
+			Ms[9] = {  {  0.34+0.00i,  0.22+0.01i,  0.04+0.13i,  0.15-0.37i },
+                       {  0.22-0.01i,  0.15+0.00i,  0.03+0.08i,  0.09-0.25i },
+                       {  0.04-0.13i,  0.03-0.08i,  0.05+0.00i, -0.12-0.10i },
+                       {  0.15+0.37i,  0.09+0.25i, -0.12+0.10i,  0.46+0.00i } };
+			Ms[10] = { {  0.08+0.00i,  0.13+0.07i,  0.04-0.20i, -0.03+0.08i },
+                       {  0.13-0.07i,  0.29+0.00i, -0.10-0.38i,  0.01+0.16i },
+                       {  0.04+0.20i, -0.10+0.38i,  0.54+0.00i, -0.22-0.05i },
+                       { -0.03-0.08i,  0.01-0.16i, -0.22+0.05i,  0.09+0.00i } };
+			Ms[11] = { {  0.29+0.00i,  0.03-0.10i,  0.06+0.26i, -0.08+0.34i },
+                       {  0.03+0.10i,  0.04+0.00i, -0.09+0.05i, -0.13+0.01i },
+                       {  0.06-0.26i, -0.09-0.05i,  0.24+0.00i,  0.29+0.14i },
+                       { -0.08-0.34i, -0.13-0.01i,  0.29-0.14i,  0.43+0.00i } };
+			Ms[12] = { {  0.03+0.00i, -0.03+0.04i, -0.02-0.08i, -0.12+0.00i },
+                       { -0.03-0.04i,  0.09+0.00i, -0.09+0.12i,  0.15+0.18i },
+                       { -0.02+0.08i, -0.09-0.12i,  0.27+0.00i,  0.10-0.40i },
+                       { -0.12-0.00i,  0.15-0.18i,  0.10+0.40i,  0.62+0.00i } };
+			Ms[13] = { {  0.19+0.00i, -0.03+0.14i, -0.08+0.31i, -0.10-0.13i },
+                       { -0.03-0.14i,  0.11+0.00i,  0.25+0.01i, -0.08+0.10i },
+                       { -0.08-0.31i,  0.25-0.01i,  0.56+0.00i, -0.17+0.22i },
+                       { -0.10+0.13i, -0.08-0.10i, -0.17-0.22i,  0.14+0.00i } };
+			Ms[14] = { {  0.37+0.00i, -0.11+0.27i,  0.16-0.19i,  0.28+0.10i },
+                       { -0.11-0.27i,  0.23+0.00i, -0.19-0.05i, -0.02-0.23i },
+                       {  0.16+0.19i, -0.19+0.05i,  0.16+0.00i,  0.07+0.18i },
+                       {  0.28-0.10i, -0.02+0.23i,  0.07-0.18i,  0.23+0.00i } };
+			Ms[15] = { {  0.41+0.00i,  0.18-0.45i, -0.05-0.04i, -0.05+0.03i },
+                       {  0.18+0.45i,  0.57+0.00i,  0.03-0.07i, -0.05-0.05i },
+                       { -0.05+0.04i,  0.03+0.07i,  0.01+0.00i,  0.00-0.01i },
+                       { -0.05-0.03i, -0.05+0.05i,  0.00+0.01i,  0.01+0.00i } };
+		} else if (d == 6 && sets == 4) {
+			Ms[0] = {  {  0.17+0.00i, -0.11+0.01i,  0.09+0.09i, -0.03+0.17i,  0.12-0.16i,  0.18-0.13i },
+                       { -0.11-0.01i,  0.06+0.00i, -0.05-0.06i,  0.02-0.10i, -0.08+0.09i, -0.11+0.07i },
+                       {  0.09-0.09i, -0.05+0.06i,  0.09+0.00i,  0.07+0.10i, -0.01-0.15i,  0.03-0.16i },
+                       { -0.03-0.17i,  0.02+0.10i,  0.07-0.10i,  0.16+0.00i, -0.17-0.09i, -0.15-0.15i },
+                       {  0.12+0.16i, -0.08-0.09i, -0.01+0.15i, -0.17+0.09i,  0.23+0.00i,  0.24+0.06i },
+                       {  0.18+0.13i, -0.11-0.07i,  0.03+0.16i, -0.15+0.15i,  0.24-0.06i,  0.28+0.00i } };
+			Ms[1] = {  {  0.07+0.00i,  0.11-0.12i, -0.05-0.07i,  0.12-0.06i,  0.07-0.02i,  0.05-0.03i },
+                       {  0.11+0.12i,  0.42+0.00i,  0.05-0.23i,  0.30+0.13i,  0.16+0.09i,  0.15+0.03i },
+                       { -0.05+0.07i,  0.05+0.23i,  0.13+0.00i, -0.03+0.18i, -0.03+0.09i, -0.00+0.08i },
+                       {  0.12+0.06i,  0.30-0.13i, -0.03-0.18i,  0.25+0.00i,  0.14+0.02i,  0.11-0.02i },
+                       {  0.07+0.02i,  0.16-0.09i, -0.03-0.09i,  0.14-0.02i,  0.08+0.00i,  0.06-0.02i },
+                       {  0.05+0.03i,  0.15-0.03i, -0.00-0.08i,  0.11+0.02i,  0.06+0.02i,  0.05+0.00i } };
+			Ms[2] = {  {  0.06+0.00i,  0.03+0.03i,  0.08-0.11i, -0.13-0.09i,  0.04+0.01i, -0.02-0.05i },
+                       {  0.03-0.03i,  0.04+0.00i, -0.02-0.12i, -0.14+0.03i,  0.03-0.02i, -0.04-0.02i },
+                       {  0.08+0.11i, -0.02+0.12i,  0.34+0.00i, -0.01-0.40i,  0.05+0.10i,  0.07-0.11i },
+                       { -0.13+0.09i, -0.14-0.03i, -0.01+0.40i,  0.48+0.00i, -0.11+0.06i,  0.13+0.09i },
+                       {  0.04-0.01i,  0.03+0.02i,  0.05-0.10i, -0.11-0.06i,  0.03+0.00i, -0.02-0.04i },
+                       { -0.02+0.05i, -0.04+0.02i,  0.07+0.11i,  0.13-0.09i, -0.02+0.04i,  0.05+0.00i } };
+			Ms[3] = {  {  0.04+0.00i,  0.05-0.04i,  0.06+0.01i, -0.02-0.02i, -0.09-0.11i,  0.02+0.12i },
+                       {  0.05+0.04i,  0.08+0.00i,  0.06+0.07i, -0.01-0.04i, -0.01-0.19i, -0.08+0.15i },
+                       {  0.06-0.01i,  0.06-0.07i,  0.09+0.00i, -0.04-0.02i, -0.16-0.12i,  0.06+0.16i },
+                       { -0.02+0.02i, -0.01+0.04i, -0.04+0.02i,  0.02+0.00i,  0.08+0.02i, -0.05-0.05i },
+                       { -0.09+0.11i, -0.01+0.19i, -0.16+0.12i,  0.08-0.02i,  0.43+0.00i, -0.32-0.20i },
+                       {  0.02-0.12i, -0.08-0.15i,  0.06-0.16i, -0.05+0.05i, -0.32+0.20i,  0.33+0.00i } };
+			Ms[4] = {  {  0.13+0.00i,  0.17-0.03i, -0.03+0.19i, -0.08+0.02i, -0.11+0.10i, -0.06-0.12i },
+                       {  0.17+0.03i,  0.23+0.00i, -0.08+0.24i, -0.10+0.01i, -0.16+0.11i, -0.05-0.18i },
+                       { -0.03-0.19i, -0.08-0.24i,  0.28+0.00i,  0.05+0.11i,  0.17+0.14i, -0.17+0.12i },
+                       { -0.08-0.02i, -0.10-0.01i,  0.05-0.11i,  0.05+0.00i,  0.08-0.04i,  0.02+0.08i },
+                       { -0.11-0.10i, -0.16-0.11i,  0.17-0.14i,  0.08+0.04i,  0.17+0.00i, -0.05+0.15i },
+                       { -0.06+0.12i, -0.05+0.18i, -0.17-0.12i,  0.02-0.08i, -0.05-0.15i,  0.15+0.00i } };
+			Ms[5] = {  {  0.53+0.00i, -0.26+0.15i, -0.15-0.10i,  0.14-0.02i, -0.04+0.18i, -0.16+0.22i },
+                       { -0.26-0.15i,  0.16+0.00i,  0.05+0.09i, -0.08-0.03i,  0.07-0.07i,  0.14-0.06i },
+                       { -0.15+0.10i,  0.05-0.09i,  0.06+0.00i, -0.04+0.03i, -0.02-0.06i,  0.01-0.09i },
+                       {  0.14+0.02i, -0.08+0.03i, -0.04-0.03i,  0.04+0.00i, -0.02+0.05i, -0.05+0.05i },
+                       { -0.04-0.18i,  0.07+0.07i, -0.02+0.06i, -0.02-0.05i,  0.06+0.00i,  0.09+0.04i },
+                       { -0.16-0.22i,  0.14+0.06i,  0.01+0.09i, -0.05-0.05i,  0.09-0.04i,  0.14+0.00i } };
+			Ms[6] = {  {  0.21+0.00i, -0.14-0.13i,  0.21+0.18i,  0.07-0.10i, -0.04-0.13i, -0.14-0.04i },
+                       { -0.14+0.13i,  0.17+0.00i, -0.25+0.01i,  0.02+0.11i,  0.10+0.06i,  0.12-0.07i },
+                       {  0.21-0.18i, -0.25-0.01i,  0.36+0.00i, -0.02-0.15i, -0.15-0.10i, -0.18+0.09i },
+                       {  0.07+0.10i,  0.02-0.11i, -0.02+0.15i,  0.07+0.00i,  0.05-0.06i, -0.03-0.08i },
+                       { -0.04+0.13i,  0.10-0.06i, -0.15+0.10i,  0.05+0.06i,  0.08+0.00i,  0.05-0.08i },
+                       { -0.14+0.04i,  0.12+0.07i, -0.18-0.09i, -0.03+0.08i,  0.05+0.08i,  0.11+0.00i } };
+			Ms[7] = {  {  0.18+0.00i,  0.22+0.04i, -0.07-0.08i, -0.01-0.02i,  0.02+0.08i, -0.27+0.05i },
+                       {  0.22-0.04i,  0.28+0.00i, -0.11-0.09i, -0.02-0.02i,  0.04+0.09i, -0.33+0.12i },
+                       { -0.07+0.08i, -0.11+0.09i,  0.07+0.00i,  0.01+0.00i, -0.05-0.02i,  0.09-0.15i },
+                       { -0.01+0.02i, -0.02+0.02i,  0.01-0.00i,  0.00+0.00i, -0.01-0.00i,  0.01-0.03i },
+                       {  0.02-0.08i,  0.04-0.09i, -0.05+0.02i, -0.01+0.00i,  0.04+0.00i, -0.01+0.13i },
+                       { -0.27-0.05i, -0.33-0.12i,  0.09+0.15i,  0.01+0.03i, -0.01-0.13i,  0.42+0.00i } };
+			Ms[8] = {  {  0.43+0.00i, -0.12-0.11i, -0.22-0.22i, -0.16-0.03i, -0.05-0.04i,  0.26-0.13i },
+                       { -0.12+0.11i,  0.07+0.00i,  0.12+0.00i,  0.05-0.03i,  0.02-0.00i, -0.04+0.11i },
+                       { -0.22+0.22i,  0.12-0.00i,  0.23+0.00i,  0.10-0.07i,  0.04-0.01i, -0.07+0.21i },
+                       { -0.16+0.03i,  0.05+0.03i,  0.10+0.07i,  0.06+0.00i,  0.02+0.01i, -0.09+0.07i },
+                       { -0.05+0.04i,  0.02+0.00i,  0.04+0.01i,  0.02-0.01i,  0.01+0.00i, -0.02+0.04i },
+                       {  0.26+0.13i, -0.04-0.11i, -0.07-0.21i, -0.09-0.07i, -0.02-0.04i,  0.20+0.00i } };
+			Ms[9] = {  {  0.09+0.00i,  0.01+0.16i, -0.02+0.03i,  0.12+0.09i,  0.01-0.13i,  0.06+0.10i },
+                       {  0.01-0.16i,  0.30+0.00i,  0.05+0.04i,  0.19-0.21i, -0.24-0.04i,  0.19-0.09i },
+                       { -0.02-0.03i,  0.05-0.04i,  0.01+0.00i,  0.00-0.06i, -0.04+0.02i,  0.02-0.04i },
+                       {  0.12-0.09i,  0.19+0.21i,  0.00+0.06i,  0.26+0.00i, -0.12-0.19i,  0.18+0.07i },
+                       {  0.01+0.13i, -0.24+0.04i, -0.04-0.02i, -0.12+0.19i,  0.19+0.00i, -0.14+0.10i },
+                       {  0.06-0.10i,  0.19+0.09i,  0.02+0.04i,  0.18-0.07i, -0.14-0.10i,  0.15+0.00i } };
+			Ms[10] = { {  0.09+0.00i, -0.01+0.03i,  0.08+0.07i,  0.04+0.03i,  0.05+0.23i,  0.08+0.02i },
+                       { -0.01-0.03i,  0.01+0.00i,  0.02-0.04i,  0.01-0.02i,  0.09-0.04i,  0.00-0.04i },
+                       {  0.08-0.07i,  0.02+0.04i,  0.14+0.00i,  0.07-0.01i,  0.24+0.17i,  0.10-0.05i },
+                       {  0.04-0.03i,  0.01+0.02i,  0.07+0.01i,  0.04+0.00i,  0.11+0.10i,  0.05-0.02i },
+                       {  0.05-0.23i,  0.09+0.04i,  0.24-0.17i,  0.11-0.10i,  0.64+0.00i,  0.11-0.21i },
+                       {  0.08-0.02i,  0.00+0.04i,  0.10+0.05i,  0.05+0.02i,  0.11+0.21i,  0.09+0.00i } };
+			Ms[11] = { {  0.01+0.00i,  0.03+0.01i,  0.03+0.02i, -0.06+0.02i, -0.00-0.02i,  0.01-0.00i },
+                       {  0.03-0.01i,  0.17+0.00i,  0.16+0.07i, -0.25+0.18i, -0.02-0.08i,  0.06-0.03i },
+                       {  0.03-0.02i,  0.16-0.07i,  0.19+0.00i, -0.17+0.28i, -0.05-0.06i,  0.04-0.06i },
+                       { -0.06-0.02i, -0.25-0.18i, -0.17-0.28i,  0.57+0.00i, -0.05+0.14i, -0.12-0.01i },
+                       { -0.00+0.02i, -0.02+0.08i, -0.05+0.06i, -0.05-0.14i,  0.04+0.00i,  0.01+0.03i },
+                       {  0.01+0.00i,  0.06+0.03i,  0.04+0.06i, -0.12+0.01i,  0.01-0.03i,  0.03+0.00i } };
+			Ms[12] = { {  0.07+0.00i, -0.20-0.12i,  0.01+0.04i,  0.05-0.00i,  0.05+0.08i,  0.05-0.02i },
+                       { -0.20+0.12i,  0.72+0.00i, -0.09-0.09i, -0.13+0.09i, -0.25-0.15i, -0.09+0.13i },
+                       {  0.01-0.04i, -0.09+0.09i,  0.02+0.00i,  0.00-0.03i,  0.05-0.01i, -0.00-0.03i },
+                       {  0.05+0.00i, -0.13-0.09i,  0.00+0.03i,  0.03+0.00i,  0.03+0.06i,  0.03-0.01i },
+                       {  0.05-0.08i, -0.25+0.15i,  0.05+0.01i,  0.03-0.06i,  0.12+0.00i,  0.01-0.06i },
+                       {  0.05+0.02i, -0.09-0.13i, -0.00+0.03i,  0.03+0.01i,  0.01+0.06i,  0.03+0.00i } };
+			Ms[13] = { {  0.12+0.00i, -0.03+0.02i, -0.05-0.07i, -0.07-0.21i, -0.21+0.05i, -0.05-0.02i },
+                       { -0.03-0.02i,  0.01+0.00i,  0.00+0.03i, -0.02+0.07i,  0.07+0.02i,  0.01+0.01i },
+                       { -0.05+0.07i,  0.00-0.03i,  0.06+0.00i,  0.15+0.04i,  0.06-0.14i,  0.03-0.02i },
+                       { -0.07+0.21i, -0.02-0.07i,  0.15-0.04i,  0.41+0.00i,  0.04-0.39i,  0.06-0.07i },
+                       { -0.21-0.05i,  0.07-0.02i,  0.06+0.14i,  0.04+0.39i,  0.38+0.00i,  0.07+0.05i },
+                       { -0.05+0.02i,  0.01-0.01i,  0.03+0.02i,  0.06+0.07i,  0.07-0.05i,  0.02+0.00i } };
+			Ms[14] = { {  0.10+0.00i, -0.01-0.01i, -0.22+0.08i, -0.04-0.02i,  0.06-0.15i,  0.03+0.07i },
+                       { -0.01+0.01i,  0.00+0.00i,  0.02-0.02i,  0.00-0.00i,  0.00+0.02i, -0.01-0.01i },
+                       { -0.22-0.08i,  0.02+0.02i,  0.56+0.00i,  0.07+0.07i, -0.27+0.28i,  0.00-0.18i },
+                       { -0.04+0.02i,  0.00+0.00i,  0.07-0.07i,  0.02+0.00i,  0.00+0.07i, -0.02-0.02i },
+                       {  0.06+0.15i,  0.00-0.02i, -0.27-0.28i,  0.00-0.07i,  0.27+0.00i, -0.09+0.09i },
+                       {  0.03-0.07i, -0.01+0.01i,  0.00+0.18i, -0.02+0.02i, -0.09-0.09i,  0.06+0.00i } };
+			Ms[15] = { {  0.02+0.00i,  0.01-0.03i, -0.00+0.00i, -0.04+0.01i,  0.02-0.03i, -0.04-0.11i },
+                       {  0.01+0.03i,  0.07+0.00i, -0.01-0.00i, -0.05-0.07i,  0.06+0.02i,  0.18-0.14i },
+                       { -0.00-0.00i, -0.01+0.00i,  0.00+0.00i,  0.01+0.00i, -0.01+0.00i, -0.01+0.02i },
+                       { -0.04-0.01i, -0.05+0.07i,  0.01-0.00i,  0.10+0.00i, -0.06+0.04i,  0.00+0.28i },
+                       {  0.02+0.03i,  0.06-0.02i, -0.01-0.00i, -0.06-0.04i,  0.06+0.00i,  0.12-0.17i },
+                       { -0.04+0.11i,  0.18+0.14i, -0.01-0.02i,  0.00-0.28i,  0.12+0.17i,  0.76+0.00i } };
+			Ms[16] = { {  0.08+0.00i,  0.03+0.10i, -0.10-0.00i,  0.14+0.11i, -0.06+0.09i,  0.01-0.08i },
+                       {  0.03-0.10i,  0.13+0.00i, -0.04+0.13i,  0.20-0.13i,  0.08+0.11i, -0.10-0.05i },
+                       { -0.10+0.00i, -0.04-0.13i,  0.14+0.00i, -0.19-0.15i,  0.08-0.12i, -0.01+0.11i },
+                       {  0.14-0.11i,  0.20+0.13i, -0.19+0.15i,  0.42+0.00i,  0.01+0.25i, -0.10-0.16i },
+                       { -0.06-0.09i,  0.08-0.11i,  0.08+0.12i,  0.01-0.25i,  0.14+0.00i, -0.10+0.05i },
+                       {  0.01+0.08i, -0.10+0.05i, -0.01-0.11i, -0.10+0.16i, -0.10-0.05i,  0.09+0.00i } };
+			Ms[17] = { {  0.61+0.00i,  0.20+0.04i,  0.36-0.05i, -0.05+0.10i,  0.15-0.04i,  0.00+0.16i },
+                       {  0.20-0.04i,  0.07+0.00i,  0.12-0.04i, -0.01+0.04i,  0.05-0.02i,  0.01+0.05i },
+                       {  0.36+0.05i,  0.12+0.04i,  0.22+0.00i, -0.04+0.06i,  0.09-0.01i, -0.01+0.09i },
+                       { -0.05-0.10i, -0.01-0.04i, -0.04-0.06i,  0.02+0.00i, -0.02-0.02i,  0.03-0.01i },
+                       {  0.15+0.04i,  0.05+0.02i,  0.09+0.01i, -0.02+0.02i,  0.04+0.00i, -0.01+0.04i },
+                       {  0.00-0.16i,  0.01-0.05i, -0.01-0.09i,  0.03+0.01i, -0.01-0.04i,  0.04+0.00i } };
+			Ms[18] = { {  0.27+0.00i,  0.01-0.14i, -0.11-0.03i,  0.06+0.26i,  0.25+0.11i, -0.09-0.10i },
+                       {  0.01+0.14i,  0.08+0.00i,  0.01-0.06i, -0.13+0.04i, -0.05+0.14i,  0.05-0.05i },
+                       { -0.11+0.03i,  0.01+0.06i,  0.05+0.00i, -0.06-0.10i, -0.12-0.02i,  0.05+0.03i },
+                       {  0.06-0.26i, -0.13-0.04i, -0.06+0.10i,  0.26+0.00i,  0.16-0.22i, -0.11+0.07i },
+                       {  0.25-0.11i, -0.05-0.14i, -0.12+0.02i,  0.16+0.22i,  0.28+0.00i, -0.12-0.05i },
+                       { -0.09+0.10i,  0.05+0.05i,  0.05-0.03i, -0.11-0.07i, -0.12+0.05i,  0.06+0.00i } };
+			Ms[19] = { {  0.00+0.00i, -0.01+0.01i,  0.01+0.01i,  0.00-0.01i,  0.00+0.02i, -0.02+0.00i },
+                       { -0.01-0.01i,  0.14+0.00i, -0.03-0.10i, -0.08+0.07i,  0.12-0.18i,  0.19+0.13i },
+                       {  0.01-0.01i, -0.03+0.10i,  0.07+0.00i, -0.04-0.07i,  0.10+0.11i, -0.13+0.10i },
+                       {  0.00+0.01i, -0.08-0.07i, -0.04+0.07i,  0.08+0.00i, -0.16+0.03i, -0.03-0.17i },
+                       {  0.00-0.02i,  0.12+0.18i,  0.10-0.11i, -0.16-0.03i,  0.33+0.00i, -0.01+0.35i },
+                       { -0.02-0.00i,  0.19-0.13i, -0.13-0.10i, -0.03+0.17i, -0.01-0.35i,  0.38+0.00i } };
+			Ms[20] = { {  0.29+0.00i, -0.06+0.22i, -0.02+0.01i, -0.21+0.06i, -0.17-0.23i, -0.15-0.02i },
+                       { -0.06-0.22i,  0.17+0.00i,  0.01+0.01i,  0.09+0.15i, -0.14+0.17i,  0.01+0.12i },
+                       { -0.02-0.01i,  0.01-0.01i,  0.00+0.00i,  0.02+0.00i,  0.00+0.02i,  0.01+0.01i },
+                       { -0.21-0.06i,  0.09-0.15i,  0.02-0.00i,  0.17+0.00i,  0.07+0.20i,  0.10+0.05i },
+                       { -0.17+0.23i, -0.14-0.17i,  0.00-0.02i,  0.07-0.20i,  0.28+0.00i,  0.10-0.11i },
+                       { -0.15+0.02i,  0.01-0.12i,  0.01-0.01i,  0.10-0.05i,  0.10+0.11i,  0.08+0.00i } };
+			Ms[21] = { {  0.32+0.00i,  0.10-0.15i, -0.02+0.22i, -0.00-0.28i, -0.05+0.08i,  0.17+0.14i },
+                       {  0.10+0.15i,  0.10+0.00i, -0.11+0.06i,  0.13-0.09i, -0.05+0.00i, -0.01+0.12i },
+                       { -0.02-0.22i, -0.11-0.06i,  0.15+0.00i, -0.19+0.02i,  0.06+0.03i,  0.09-0.13i },
+                       { -0.00+0.28i,  0.13+0.09i, -0.19-0.02i,  0.24+0.00i, -0.07-0.04i, -0.12+0.15i },
+                       { -0.05-0.08i, -0.05-0.00i,  0.06-0.03i, -0.07+0.04i,  0.03+0.00i,  0.01-0.07i },
+                       {  0.17-0.14i, -0.01-0.12i,  0.09+0.13i, -0.12-0.15i,  0.01+0.07i,  0.16+0.00i } };
+			Ms[22] = { {  0.11+0.00i, -0.07+0.11i,  0.11-0.17i,  0.15-0.02i, -0.03+0.04i,  0.12-0.02i },
+                       { -0.07-0.11i,  0.15+0.00i, -0.24+0.01i, -0.12-0.13i,  0.06-0.00i, -0.11-0.11i },
+                       {  0.11+0.17i, -0.24-0.01i,  0.36+0.00i,  0.17+0.22i, -0.08-0.00i,  0.15+0.17i },
+                       {  0.15+0.02i, -0.12+0.13i,  0.17-0.22i,  0.21+0.00i, -0.04+0.05i,  0.17-0.01i },
+                       { -0.03-0.04i,  0.06+0.00i, -0.08+0.00i, -0.04-0.05i,  0.02+0.00i, -0.04-0.04i },
+                       {  0.12+0.02i, -0.11+0.11i,  0.15-0.17i,  0.17+0.01i, -0.04+0.04i,  0.15+0.00i } };
+			Ms[23] = { {  0.01+0.00i,  0.03-0.04i,  0.04-0.03i,  0.00-0.02i, -0.01-0.02i, -0.04-0.00i },
+                       {  0.03+0.04i,  0.35+0.00i,  0.35+0.08i,  0.11-0.04i,  0.07-0.13i, -0.13-0.22i },
+                       {  0.04+0.03i,  0.35-0.08i,  0.36+0.00i,  0.10-0.07i,  0.04-0.14i, -0.17-0.19i },
+                       {  0.00+0.02i,  0.11+0.04i,  0.10+0.07i,  0.04+0.00i,  0.04-0.03i, -0.01-0.08i },
+                       { -0.01+0.02i,  0.07+0.13i,  0.04+0.14i,  0.04+0.03i,  0.06+0.00i,  0.06-0.09i },
+                       { -0.04+0.00i, -0.13+0.22i, -0.17+0.19i, -0.01+0.08i,  0.06+0.09i,  0.18+0.00i } };
+
 		} else {
 			std::cerr << "Don't have a nearby point for this problem" << std::endl;
 			return 0;
 
 		}
 
+		// Turn these into an X
+		for (int i=0; i<Ms.size(); i++) {
+			int ind = i*d;
+			for (int j=0; j<d; j++) {
+				for (int k=0; k<d; k++) {
+					XDense(ind+j, ind+k) = std::real(Ms[i][j][k]);
+					XDense(ind+halfP+j, ind+halfP+k) = std::real(Ms[i][j][k]);
+					XDense(ind+j+halfP, ind+k) = -std::imag(Ms[i][j][k]);
+					XDense(ind+j, ind+halfP+k) = std::imag(Ms[i][j][k]);
+				}
+			}
+		}
+
+		// Then this X into an x
+		x = Xtox(XDense);
+
+	}
+
+	// Gradient descent to make sure we start with an interior point
+	double v = 0;
+	for (int i=0; i<10000000; i++) {
+		XZero = X(x, 0.0);
+		x += -delg(XZero).row(0);
+		v = g(XZero)(0) / gScaling;
+		if (outputMode == "") {
+			std::cout << "g(x) = " << v << std::endl;
+		}
+		if (v < gThresh) {
+			break;
+		}
 	}
 
 	// Get the full matrices from this
@@ -1101,8 +1362,8 @@ int main(int argc, char ** argv) {
 	}
 
 	// Ensure this is an interior point
-	if (g(XZero).squaredNorm() > epsilon/100) {
-		std::cerr << "Error - X should start as an interior point (g(x) = " << g(XZero).squaredNorm() << " > epsilon)" << std::endl;
+	if (g(XZero)(0) / gScaling > gThresh) {
+		std::cerr << "Error - X should start as an interior point (g(x) = " << g(XZero)(0)/gScaling << " > epsilon)" << std::endl;
 		return 1;
 	}
 	if (!isPD(XCached)) {
@@ -1124,31 +1385,36 @@ int main(int argc, char ** argv) {
 	}
 
 	// Output the initial Z
-	if (outputMode == "") {
-		std::cout << "" << std::endl;
-		std::cout << "--------------------------------" << std::endl;
-		std::cout << "      Initial Z " << std::endl;;
-		std::cout << "--------------------------------" << std::endl;
-		for (int i=0; i<numMeasureB; i++) {
-			for (int j=0; j<numOutcomeB; j++) {
-				int ind = (i*numOutcomeB + j)*d;
-				Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
-				std::cout << std::endl;
-				prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
-			}
-		}
-		std::cout << std::endl;
-		prettyPrint("X dot Z = ", XCached.cwiseProduct(Z).sum());
-	}
+	//if (outputMode == "") {
+		//std::cout << "" << std::endl;
+		//std::cout << "--------------------------------" << std::endl;
+		//std::cout << "      Initial Z " << std::endl;;
+		//std::cout << "--------------------------------" << std::endl;
+		//for (int i=0; i<numMeasureB; i++) {
+			//for (int j=0; j<numOutcomeB; j++) {
+				//int ind = (i*numOutcomeB + j)*d;
+				//Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
+				//std::cout << std::endl;
+				//prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
+			//}
+		//}
+		//std::cout << std::endl;
+		//prettyPrint("X dot Z = ", XCached.cwiseProduct(Z).sum());
+	//}
 
 	// Init some thing that are used for the first calcs
 	Eigen::SparseMatrix<double> XInverse = XDense.inverse().sparseView();
 	Eigen::SparseMatrix<double> ZInverse = Z.inverse().sparseView();
-	Eigen::MatrixXd gCached = g(XZero);
+	Eigen::VectorXd gCached = g(XZero);
 	Eigen::MatrixXd A_0 = delg(XZero);
 	Eigen::VectorXd delfCached = delf(XZero);
 	Eigen::VectorXd delLCached = delL(y, Z, delfCached, A_0);
 	double rMagZero = rMag(0, Z, XCached, delLCached, gCached);
+
+	// Used for the BFGS update
+	Eigen::VectorXd prevx = x;
+	Eigen::MatrixXd prevA_0 = delg(XZero);
+	Eigen::VectorXd prevDelfCached = delf(XZero);
 
 	// To prevent reinit each time
 	Eigen::MatrixXd G = Eigen::MatrixXd::Zero(n, n);
@@ -1160,6 +1426,54 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd deltay = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd deltaZ = Eigen::MatrixXd::Zero(p, p);
 
+	// If using the BFGS update
+	if (useBFGS) {
+
+		// Only calculate the full Hessian once, use a BFGS-like update later
+		G = del2L(XZero, y);
+
+		// See if G is already PD
+		if (!isPD(G)) {
+
+			// If G-sigma*I is PD
+			double sigma = 1;
+			Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
+			if (isPD(G-sigma*I)) {
+
+				// Decrease sigma until it isn't
+				while (isPD(G-sigma*I) && sigma >= 1e-7) {
+					sigma /= 2;
+				}
+
+				// Then return to the one that was still PD
+				sigma *= 2;
+
+			// If G-sigma*I is not PD
+			} else {
+
+				// Increase sigma until it is
+				while (!isPD(G-sigma*I)) {
+					sigma *= 2;
+				}
+
+			}
+
+			// Update this new G
+			G = G-sigma*I;
+
+		}
+
+	}
+
+	// Stuff for calculating ETAs
+	int prevWindowSize = 10;
+	int nextInPrev = 0;
+	std::vector<int> prevTimes(prevWindowSize);
+	std::vector<double> prevRs(prevWindowSize);
+	auto innerTimerStart = std::chrono::high_resolution_clock::now();
+	auto innerTimerStop = std::chrono::high_resolution_clock::now();
+	double prevR = 0;
+	
 	// Outer loop
 	double rMagMu = 0;
 	int k = 0;
@@ -1217,39 +1531,44 @@ int main(int argc, char ** argv) {
 			delfCached = delf(XZero);
 			delLCached = delL(y, Z, delfCached, A_0);
 
-			// Update G
-			G = del2L(XZero, y);
+			// If not doing BFGS, need to do a full re-calc of G TODO how often
+			if (!useBFGS || totalInner % 20 == 0) {
 
-			// See if G is already PD
-			if (!isPD(G)) {
+				// Update G
+				G = del2L(XZero, y);
 
-				// If G-sigma*I is PD
-				double sigma = 1;
-				Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
-				if (isPD(G-sigma*I)) {
+				// See if G is already PD
+				if (!isPD(G)) {
 
-					// Decrease sigma until it isn't
-					while (isPD(G-sigma*I) && sigma >= 1e-7) {
-						sigma /= 2;
-					}
+					// If G-sigma*I is PD
+					double sigma = 1;
+					Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
+					if (isPD(G-sigma*I)) {
 
-					// Then return to the one that was still PD
-					sigma *= 2;
+						// Decrease sigma until it isn't
+						while (isPD(G-sigma*I) && sigma >= 1e-7) {
+							sigma /= 2;
+						}
 
-				// If G-sigma*I is not PD
-				} else {
-
-					// Increase sigma until it is
-					while (!isPD(G-sigma*I)) {
+						// Then return to the one that was still PD
 						sigma *= 2;
+
+					// If G-sigma*I is not PD
+					} else {
+
+						// Increase sigma until it is
+						while (!isPD(G-sigma*I)) {
+							sigma *= 2;
+						}
+
 					}
 
-				}
+					// Update this new G
+					G = G-sigma*I;
 
-				// Update this new G
-				G = G-sigma*I;
+				}	
 
-			}	
+			}
 
 			// Construct H
 			for (int j=0; j<n; j++) {
@@ -1308,6 +1627,13 @@ int main(int argc, char ** argv) {
 				}
 			}
 
+			// Save certain quantities for the BFGS update
+			if (useBFGS) {
+				prevx = x;
+				prevDelfCached = delfCached;
+				prevA_0 = A_0;
+			}
+
 			// Update variables
 			x += alpha*deltax;
 			y += deltay;
@@ -1316,7 +1642,37 @@ int main(int argc, char ** argv) {
 			// Inner-iteration output
 			rMagMu = rMag(mu, Z, XCached, delLCached, gCached);
 			if (outputMode == "") {
-				std::cout << "f = " << f(XZero) << "   r = " << rMagMu  << " ?< " << epsilonPrime << "   g = " << gCached/gScaling << std::endl;
+
+				// Keep track of the last ten r's and times
+				innerTimerStop = std::chrono::high_resolution_clock::now();
+				prevTimes[nextInPrev] = std::chrono::duration_cast<std::chrono::milliseconds>(innerTimerStop-innerTimerStart).count();
+				prevRs[nextInPrev] = rMagMu-prevR;
+				nextInPrev++;
+				if (nextInPrev >= prevWindowSize) {
+					nextInPrev = 0;
+				}
+
+				// Find the average
+				double averageDeltaR = 0;
+				double averageTime = 0;
+				for (int i=0; i<prevWindowSize; i++) {
+					averageDeltaR += prevRs[i];
+					averageTime += prevTimes[i];
+				}
+				averageDeltaR /= prevWindowSize;
+				averageTime /= prevWindowSize;
+				averageTime /= 1000;
+
+				// Calculate the ETA
+				int eta = (epsilon - rMagMu) / (averageDeltaR / averageTime);
+
+				// Output the line
+				std::cout << "f = " << f(XZero) << "   r = " << rMagMu  << " ?< " << epsilonPrime << "   g = " << gCached/gScaling << "   eta = " << eta << " s" << std::endl;
+
+				// Start the timer for the next iteration
+				innerTimerStart = std::chrono::high_resolution_clock::now();
+				prevR = rMagMu;
+
 			}
 
 			// Check if local convergence is reached
@@ -1324,6 +1680,57 @@ int main(int argc, char ** argv) {
 				break;
 			}
 
+			// If using a BFGS update
+			if (useBFGS) {
+
+				// Update certain quantities
+				XZero = X(x, 0.0);
+				A_0 = delg(XZero);
+				delfCached = delf(XZero);
+
+				// Update G TODO maybe try L(new,new,new) - L(old,old,old)?
+				Eigen::VectorXd s = x - prevx;
+				Eigen::VectorXd q = delL(y, Z, delfCached, A_0) - delL(y, Z, prevDelfCached, prevA_0);
+				double psi = 1;
+				if (s.dot(q) < 0.2*s.dot(G*s)) {
+					psi = (0.8*s.dot(G*s)) / (s.dot(G*s-q));
+				}
+				Eigen::VectorXd qBar = psi*q + (1-psi)*(G*s);
+				G = G - ((G*(s*(s.transpose()*G))) / (s.dot(G*s))) + ((qBar*qBar.transpose()) / (s.dot(qBar)));
+
+				// See if G is already PD
+				if (!isPD(G)) {
+
+					// If G-sigma*I is PD
+					double sigma = 1;
+					Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
+					if (isPD(G-sigma*I)) {
+
+						// Decrease sigma until it isn't
+						while (isPD(G-sigma*I) && sigma >= 1e-7) {
+							sigma /= 2;
+						}
+
+						// Then return to the one that was still PD
+						sigma *= 2;
+
+					// If G-sigma*I is not PD
+					} else {
+
+						// Increase sigma until it is
+						while (!isPD(G-sigma*I)) {
+							sigma *= 2;
+						}
+
+					}
+
+					// Update this new G
+					G = G-sigma*I;
+
+				}
+
+			}
+			
 		}
 
 		// Stop if the max total inner has been reached
