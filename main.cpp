@@ -22,7 +22,6 @@ using namespace std::complex_literals;
 int d = 2;
 int sets = 2;
 std::string initMode = "fixed";
-bool useBFGS = false;
 
 // Optimisation parameters
 double extraDiag = 1.0;
@@ -34,6 +33,8 @@ double fScaling = 1.00;
 double gScaling = 0.001;
 double gThresh = 1e-8;
 int numCores = 1;
+bool useBFGS = false;
+int BFGSFreq = 10;
 
 // Parameters between 0 and 1
 double gammaVal = 0.9;
@@ -499,26 +500,32 @@ Eigen::VectorXd g(Eigen::SparseMatrix<double> XZero) {
 	Eigen::VectorXd gOutput(m);
 
 	// Force the measurement to be projective
-	gOutput(0) = (XZero*XZero - XZero).squaredNorm();
+	//gOutput(0) = (XZero*XZero - XZero).squaredNorm();
+	//gOutput(0) = trace(XZero*XZero - XZero);
+	gOutput(0) = trace(XZero - XZero*XZero);
 
 	// Return this vector of things that should be zero
 	return gScaling*gOutput;
 
 }
 
-// Gradient of the constraint function
+// Gradient of the constraint function TODO
 Eigen::MatrixXd delg(Eigen::SparseMatrix<double> XZero) {
 
 	// Matrix representing the Jacobian of g
 	Eigen::MatrixXd gOutput(m, n);
 
 	// Cache X^2-X
-	Eigen::SparseMatrix<double> GCached = XZero*XZero - XZero;
+	//Eigen::SparseMatrix<double> GCached = XZero*XZero - XZero;
+
+	Eigen::SparseMatrix<double> XNorm = XZero;
 
 	// The derivative wrt each x
     #pragma omp parallel for
 	for (int i=0; i<n; i++) {
-		gOutput(0, i) = 2*GCached.cwiseProduct(2*As[i]*XZero - As[i]).sum();
+		//gOutput(0, i) = 2*GCached.cwiseProduct(2*As[i]*XZero - As[i]).sum();
+		//gOutput(0, i) = trace(2*As[i]*XNorm - As[i]);
+		gOutput(0, i) = trace(As[i] - 2*As[i]*XNorm);
 	}
 
 	// Return the gradient vector of g
@@ -540,7 +547,8 @@ Eigen::MatrixXd del2g(Eigen::SparseMatrix<double> XZero) {
 	for (int i=0; i<n; i++) {
 		Eigen::SparseMatrix<double> AsiXZero = 2*As[i]*XZero - As[i];
 		for (int j=0; j<n; j++) {
-			gOutput(i, j) = 2*((2*As[j]*XZero - As[j]).cwiseProduct(AsiXZero).sum()) + 4*(GCached.cwiseProduct(As[i]*As[j]).sum());
+			//gOutput(i, j) = 2*((2*As[j]*XZero - As[j]).cwiseProduct(AsiXZero).sum()) + 4*(GCached.cwiseProduct(As[i]*As[j]).sum());
+			gOutput(i, j) = trace(2*As[i]*As[j]);
 		}
 	}
 
@@ -555,12 +563,12 @@ double L(Eigen::SparseMatrix<double> XZero, Eigen::SparseMatrix<double> XCached,
 }
 
 // Differential of the Lagrangian given individual components
-Eigen::VectorXd delL(Eigen::VectorXd y, Eigen::MatrixXd Z, Eigen::VectorXd delfCached, Eigen::MatrixXd A_0) {
+Eigen::VectorXd delL(Eigen::VectorXd y, Eigen::SparseMatrix<double> ZSparse, Eigen::VectorXd delfCached, Eigen::MatrixXd A_0) {
 
 	// Calculate A* Z
 	Eigen::VectorXd AStarZ = Eigen::VectorXd::Zero(n);
 	for (int i=0; i<n; i++) {
-		AStarZ(i) = As[i].cwiseProduct(Z).sum();
+		AStarZ(i) = As[i].cwiseProduct(ZSparse).sum();
 	}
 
 	// Return this vector
@@ -577,14 +585,14 @@ Eigen::MatrixXd del2L(Eigen::SparseMatrix<double> XZero, Eigen::VectorXd y) {
 }
 
 // Function giving the norm of a point, modified by some mu
-double rMag(double mu, Eigen::MatrixXd Z, Eigen::SparseMatrix<double> XCached, Eigen::VectorXd delLCached, Eigen::VectorXd gCached) {
+double rMag(double mu, Eigen::SparseMatrix<double> ZSparse, Eigen::SparseMatrix<double> XCached, Eigen::VectorXd delLCached, Eigen::VectorXd gCached) {
 
 	// The left part of the square root
 	Eigen::VectorXd left = Eigen::VectorXd::Zero(n+m);
 	left << delLCached, gCached;
 
 	// The right part of the square root
-	Eigen::MatrixXd right = XCached * Z - mu * Eigen::MatrixXd::Identity(p,p);
+	Eigen::MatrixXd right = XCached * ZSparse - mu * Eigen::MatrixXd::Identity(p,p);
 
 	// Sum the l^2/Frobenius norms
 	double val = std::sqrt(left.squaredNorm() + right.squaredNorm());
@@ -628,12 +636,14 @@ double deltaF(Eigen::MatrixXd deltaZ, Eigen::SparseMatrix<double> ZInverse, Eige
 
 }
 
-// Returns true if a matrix can be Cholesky decomposed
+// Returns true if a matrix can be Cholesky decomposed TODO
 bool isPD(Eigen::MatrixXd G) {
-	return G.ldlt().info() != Eigen::NumericalIssue;
+	//return G.ldlt().info() != Eigen::NumericalIssue;
+	return G.eigenvalues().real().minCoeff() >= 0;
 }
 bool isComplexPD(Eigen::MatrixXcd G) {
-	return G.ldlt().info() != Eigen::NumericalIssue;
+	//return G.ldlt().info() != Eigen::NumericalIssue;
+	return G.eigenvalues().real().minCoeff() >= 0;
 }
 
 // Standard cpp entry point
@@ -658,7 +668,7 @@ int main(int argc, char ** argv) {
 			std::cout << " -d [int]         set the dimension" << std::endl;
 			std::cout << " -n [int]         set the number of measurements" << std::endl;
 			std::cout << " -c [int]         set how many cores to use" << std::endl;
-			std::cout << " -B               use the BFGS update method" << std::endl;
+			std::cout << " -S [int]         use the BFGS update with a full update every this many iters" << std::endl;
 			std::cout << "                        " << std::endl;
 			std::cout << "       output options          " << std::endl;
 			std::cout << " -p [int]         set the precision" << std::endl;
@@ -696,8 +706,10 @@ int main(int argc, char ** argv) {
 			i += 1;
 
 		// Use the BFGS update method
-		} else if (arg == "-B") {
+		} else if (arg == "-S") {
 			useBFGS = true;
+			BFGSFreq = std::stoi(argv[i+1]);
+			i += 1;
 
 		// Set the number of cores 
 		} else if (arg == "-c") {
@@ -998,7 +1010,6 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd x = Eigen::VectorXd::Zero(n);
 	Eigen::VectorXd y = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd Z = Eigen::MatrixXd::Zero(p, p);
-	Eigen::SparseMatrix<double> ZSparse(p, p);
 
 	// The (currently blank) cached form of X(x)
 	Eigen::SparseMatrix<double> XZero(p, p);
@@ -1087,6 +1098,52 @@ int main(int argc, char ** argv) {
 		 		      { -0.31-0.38i,  0.42+0.00i } };
 		    Ms[7] = { {  0.42+0.00i,  0.31-0.38i },
 				      {  0.31+0.38i,  0.58+0.00i } };
+		} else if (d == 3 && sets == 5) {
+		    Ms[0] = {  {  0.50+0.00i, -0.25-0.40i,  0.11-0.12i },
+                       { -0.25+0.40i,  0.45+0.00i,  0.04+0.15i },
+                       {  0.11+0.12i,  0.04-0.15i,  0.05+0.00i } };
+		    Ms[1] = {  {  0.18+0.00i,  0.00+0.07i, -0.18+0.33i },
+                       {  0.00-0.07i,  0.03+0.00i,  0.13+0.08i },
+                       { -0.18-0.33i,  0.13-0.08i,  0.79+0.00i } };
+		    Ms[2] = {  {  0.33+0.00i,  0.25+0.33i,  0.07-0.21i },
+                       {  0.25-0.33i,  0.52+0.00i, -0.16-0.23i },
+                       {  0.07+0.21i, -0.16+0.23i,  0.15+0.00i } };
+		    Ms[3] = {  {  0.09+0.00i, -0.01+0.07i,  0.19-0.20i },
+                       { -0.01-0.07i,  0.05+0.00i, -0.18-0.11i },
+                       {  0.19+0.20i, -0.18+0.11i,  0.86+0.00i } };
+		    Ms[4] = {  {  0.78+0.00i, -0.29+0.06i, -0.24+0.16i },
+                       { -0.29-0.06i,  0.11+0.00i,  0.10-0.04i },
+                       { -0.24-0.16i,  0.10+0.04i,  0.11+0.00i } };
+		    Ms[5] = {  {  0.13+0.00i,  0.30-0.12i,  0.05+0.04i },
+                       {  0.30+0.12i,  0.84+0.00i,  0.08+0.15i },
+                       {  0.05-0.04i,  0.08-0.15i,  0.03+0.00i } };
+		    Ms[6] = {  {  0.19+0.00i, -0.17+0.24i, -0.17-0.19i },
+                       { -0.17-0.24i,  0.47+0.00i, -0.09+0.39i },
+                       { -0.17+0.19i, -0.09-0.39i,  0.35+0.00i } };
+		    Ms[7] = {  {  0.14+0.00i, -0.02-0.26i, -0.23+0.03i },
+                       { -0.02+0.26i,  0.48+0.00i, -0.03-0.43i },
+                       { -0.23-0.03i, -0.03+0.43i,  0.38+0.00i } };
+		    Ms[8] = {  {  0.67+0.00i,  0.19+0.02i,  0.40+0.16i },
+                       {  0.19-0.02i,  0.05+0.00i,  0.12+0.03i },
+                       {  0.40-0.16i,  0.12-0.03i,  0.27+0.00i } };
+		    Ms[9] = {  {  0.57+0.00i,  0.35+0.02i, -0.32+0.12i },
+                       {  0.35-0.02i,  0.22+0.00i, -0.19+0.09i },
+                       { -0.32-0.12i, -0.19-0.09i,  0.21+0.00i } };
+		    Ms[10] = { {  0.07+0.00i,  0.02-0.15i,  0.07-0.19i },
+                       {  0.02+0.15i,  0.33+0.00i,  0.44+0.08i },
+                       {  0.07+0.19i,  0.44-0.08i,  0.60+0.00i } };
+		    Ms[11] = { {  0.35+0.00i, -0.38+0.13i,  0.25+0.07i },
+                       { -0.38-0.13i,  0.45+0.00i, -0.24-0.17i },
+                       {  0.25-0.07i, -0.24+0.17i,  0.20+0.00i } };
+		    Ms[12] = { {  0.18+0.00i, -0.09+0.32i,  0.02+0.19i },
+                       { -0.09-0.32i,  0.61+0.00i,  0.34-0.13i },
+                       {  0.02-0.19i,  0.34+0.13i,  0.21+0.00i } };
+		    Ms[13] = { {  0.15+0.00i,  0.02-0.24i,  0.10+0.25i },
+                       {  0.02+0.24i,  0.37+0.00i, -0.38+0.19i },
+                       {  0.10-0.25i, -0.38-0.19i,  0.48+0.00i } };
+		    Ms[14] = { {  0.67+0.00i,  0.07-0.08i, -0.12-0.44i },
+                       {  0.07+0.08i,  0.02+0.00i,  0.04-0.06i },
+                       { -0.12+0.44i,  0.04+0.06i,  0.31+0.00i } };
 		} else if (d == 4 && sets == 4) {
 			Ms[0] = {  {  0.39+0.00i, -0.29-0.12i,  0.16+0.26i,  0.17-0.14i },
 					   { -0.29+0.12i,  0.25+0.00i, -0.20-0.14i, -0.08+0.15i },
@@ -1322,24 +1379,34 @@ int main(int argc, char ** argv) {
 
 	}
 
-	// Gradient descent to make sure we start with an interior point
+	// Gradient descent to make sure we start with an interior point TODO
 	double v = 0;
-	for (int i=0; i<10000000; i++) {
-		XZero = X(x, 0.0);
-		x += -delg(XZero).row(0);
-		v = g(XZero)(0) / gScaling;
+	//for (int i=0; i<10000000; i++) {
+	for (int i=0; i<10000; i++) {
+		XZero = X(x);
+		v = std::abs(g(XZero)(0) / gScaling);
 		if (outputMode == "") {
 			std::cout << "g(x) = " << v << std::endl;
 		}
 		if (v < gThresh) {
 			break;
 		}
+		Eigen::VectorXd dir = -delg(XZero).row(0);
+		for (int j=0; j<10; j++) {
+			if (isPD(X(x+dir, 0.0))) {
+				break;
+			}
+			dir *= beta;
+		}
+		x += dir;
 	}
 
 	// Get the full matrices from this
 	XZero = X(x, 0.0);
 	XCached = X(x);
 	XDense = Eigen::MatrixXd(XCached);
+
+	std::cout << "isPD = " << isPD(XZero) << std::endl;
 
 	// Output the initial X
 	if (outputMode == "") {
@@ -1356,14 +1423,15 @@ int main(int argc, char ** argv) {
 				prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
 				std::cout << std::endl;
 				std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
+				std::cout << "tr(M^2-M)  = " << (M.adjoint()*M - M).trace() << std::endl;
 				std::cout << "is M PD? = " << isComplexPD(M) << std::endl;
 			}
 		}
 	}
 
 	// Ensure this is an interior point
-	if (g(XZero)(0) / gScaling > gThresh) {
-		std::cerr << "Error - X should start as an interior point (g(x) = " << g(XZero)(0)/gScaling << " > epsilon)" << std::endl;
+	if (std::abs(g(XZero)(0) / gScaling) > gThresh) {
+		std::cerr << "Error - X should start as an interior point (g(x) = " << std::abs(g(XZero)(0) / gScaling) << " > gThresh)" << std::endl;
 		return 1;
 	}
 	if (!isPD(XCached)) {
@@ -1405,16 +1473,17 @@ int main(int argc, char ** argv) {
 	// Init some thing that are used for the first calcs
 	Eigen::SparseMatrix<double> XInverse = XDense.inverse().sparseView();
 	Eigen::SparseMatrix<double> ZInverse = Z.inverse().sparseView();
+	Eigen::SparseMatrix<double> ZSparse = Z.sparseView();
 	Eigen::VectorXd gCached = g(XZero);
 	Eigen::MatrixXd A_0 = delg(XZero);
 	Eigen::VectorXd delfCached = delf(XZero);
-	Eigen::VectorXd delLCached = delL(y, Z, delfCached, A_0);
-	double rMagZero = rMag(0, Z, XCached, delLCached, gCached);
+	Eigen::VectorXd delLCached = delL(y, ZSparse, delfCached, A_0);
+	double rMagZero = rMag(0, ZSparse, XCached, delLCached, gCached);
 
 	// Used for the BFGS update
 	Eigen::VectorXd prevx = x;
-	Eigen::MatrixXd prevA_0 = delg(XZero);
-	Eigen::VectorXd prevDelfCached = delf(XZero);
+	Eigen::MatrixXd prevA_0 = A_0;
+	Eigen::VectorXd prevDelfCached = delfCached;
 
 	// To prevent reinit each time
 	Eigen::MatrixXd G = Eigen::MatrixXd::Zero(n, n);
@@ -1465,15 +1534,6 @@ int main(int argc, char ** argv) {
 
 	}
 
-	// Stuff for calculating ETAs
-	int prevWindowSize = 10;
-	int nextInPrev = 0;
-	std::vector<int> prevTimes(prevWindowSize);
-	std::vector<double> prevRs(prevWindowSize);
-	auto innerTimerStart = std::chrono::high_resolution_clock::now();
-	auto innerTimerStop = std::chrono::high_resolution_clock::now();
-	double prevR = 0;
-	
 	// Outer loop
 	double rMagMu = 0;
 	int k = 0;
@@ -1481,7 +1541,7 @@ int main(int argc, char ** argv) {
 	for (k=0; k<maxOuterIter; k++) {
 
 		// Check if global convergence is reached
-		rMagZero = rMag(0, Z, XCached, delLCached, gCached);
+		rMagZero = rMag(0, ZSparse, XCached, delLCached, gCached);
 		if (rMagZero <= epsilon) {
 			break;
 		}
@@ -1529,10 +1589,10 @@ int main(int argc, char ** argv) {
 			gCached = g(XZero);
 			A_0 = delg(XZero);
 			delfCached = delf(XZero);
-			delLCached = delL(y, Z, delfCached, A_0);
+			delLCached = delL(y, ZSparse, delfCached, A_0);
 
-			// If not doing BFGS, need to do a full re-calc of G TODO how often
-			if (!useBFGS || totalInner % 20 == 0) {
+			// If not doing BFGS, need to do a full re-calc of G
+			if (!useBFGS || totalInner % BFGSFreq == 0) {
 
 				// Update G
 				G = del2L(XZero, y);
@@ -1604,9 +1664,9 @@ int main(int argc, char ** argv) {
 			// Determine the max l such that beta^l = 1e-9
 			int maxL = std::log(epsilon) / std::log(beta);
 
-			// Get a base step size using the min eigenvalues
-			double alphaBarX = -gammaVal / std::real((XInverse * deltaX).eigenvalues()[0]);
-			double alphaBarZ = -gammaVal / std::real((ZInverse * deltaZ).eigenvalues()[0]);
+			// Get a base step size using the min eigenvalues TODO these aren't sorted
+			double alphaBarX = -gammaVal / (XInverse * deltaX).eigenvalues().real().minCoeff();
+			double alphaBarZ = -gammaVal / (ZInverse * deltaZ).eigenvalues().real().minCoeff();
 			if (alphaBarX < 0) {
 				alphaBarX = 1;
 			}
@@ -1634,44 +1694,12 @@ int main(int argc, char ** argv) {
 				prevA_0 = A_0;
 			}
 
-			// Update variables
-			x += alpha*deltax;
-			y += deltay;
-			Z += alpha*deltaZ;
-			
 			// Inner-iteration output
-			rMagMu = rMag(mu, Z, XCached, delLCached, gCached);
+			rMagMu = rMag(mu, ZSparse, XCached, delLCached, gCached);
 			if (outputMode == "") {
 
-				// Keep track of the last ten r's and times
-				innerTimerStop = std::chrono::high_resolution_clock::now();
-				prevTimes[nextInPrev] = std::chrono::duration_cast<std::chrono::milliseconds>(innerTimerStop-innerTimerStart).count();
-				prevRs[nextInPrev] = rMagMu-prevR;
-				nextInPrev++;
-				if (nextInPrev >= prevWindowSize) {
-					nextInPrev = 0;
-				}
-
-				// Find the average
-				double averageDeltaR = 0;
-				double averageTime = 0;
-				for (int i=0; i<prevWindowSize; i++) {
-					averageDeltaR += prevRs[i];
-					averageTime += prevTimes[i];
-				}
-				averageDeltaR /= prevWindowSize;
-				averageTime /= prevWindowSize;
-				averageTime /= 1000;
-
-				// Calculate the ETA
-				int eta = (epsilon - rMagMu) / (averageDeltaR / averageTime);
-
 				// Output the line
-				std::cout << "f = " << f(XZero) << "   r = " << rMagMu  << " ?< " << epsilonPrime << "   g = " << gCached/gScaling << "   eta = " << eta << " s" << std::endl;
-
-				// Start the timer for the next iteration
-				innerTimerStart = std::chrono::high_resolution_clock::now();
-				prevR = rMagMu;
+				std::cout << "f = " << f(XZero) << "   r = " << rMagMu  << " ?< " << epsilonPrime << "   g = " << gCached(0)/gScaling << std::endl;
 
 			}
 
@@ -1680,6 +1708,11 @@ int main(int argc, char ** argv) {
 				break;
 			}
 
+			// Update variables
+			x += alpha*deltax;
+			y += deltay;
+			Z += alpha*deltaZ;
+			
 			// If using a BFGS update
 			if (useBFGS) {
 
@@ -1690,7 +1723,7 @@ int main(int argc, char ** argv) {
 
 				// Update G TODO maybe try L(new,new,new) - L(old,old,old)?
 				Eigen::VectorXd s = x - prevx;
-				Eigen::VectorXd q = delL(y, Z, delfCached, A_0) - delL(y, Z, prevDelfCached, prevA_0);
+				Eigen::VectorXd q = delL(y, ZSparse, delfCached, A_0) - delL(y, ZSparse, prevDelfCached, prevA_0);
 				double psi = 1;
 				if (s.dot(q) < 0.2*s.dot(G*s)) {
 					psi = (0.8*s.dot(G*s)) / (s.dot(G*s-q));
@@ -1775,8 +1808,11 @@ int main(int argc, char ** argv) {
 		std::cout << "----------------------------------" << std::endl;
 		std::cout << "          r(w) = " << rMagZero << " < " << epsilon << std::endl;;
 		std::cout << "         -f(x) = " << -f(XZero)/fScaling << " <= " << maxVal << std::endl;;
-		std::cout << "          g(x) = " << gCached/gScaling << std::endl;;
+		std::cout << "          g(x) = " << gCached(0)/gScaling << std::endl;;
+		std::cout << "          g(x) = " << trace(XZero*XZero-XZero) << std::endl;;
 		std::cout << "         -L(w) = " << -L(XZero, XCached, y, Z) << std::endl;;
+		std::cout << "         <X,Z> = " << XCached.cwiseProduct(ZSparse).sum() << std::endl;;
+		std::cout << "        y*g(x) = " << y.transpose()*g(XZero) << std::endl;;
 		std::cout << "       delf(w) = " << delfCached.norm()/fScaling << std::endl;;
 		std::cout << "       delL(w) = " << delLCached.norm() << std::endl;;
 		std::cout << "       delg(w) = " << A_0.norm()/gScaling << std::endl;;
