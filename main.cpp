@@ -30,7 +30,7 @@ long int maxInnerIter =  1000000000;
 long int maxTotalInner = 1000000000;
 double muScaling = 10;
 double fScaling = 1.00;
-double gScaling = 0.001;
+double gScaling = 0.01;
 double gThresh = 1e-8;
 int numCores = 1;
 bool useBFGS = false;
@@ -500,9 +500,9 @@ Eigen::VectorXd g(Eigen::SparseMatrix<double> XZero) {
 	Eigen::VectorXd gOutput(m);
 
 	// Force the measurement to be projective
-	//gOutput(0) = (XZero*XZero - XZero).squaredNorm();
+	gOutput(0) = (XZero*XZero - XZero).squaredNorm();
 	//gOutput(0) = trace(XZero*XZero - XZero);
-	gOutput(0) = trace(XZero - XZero*XZero);
+	//gOutput(0) = trace(XZero - XZero*XZero);
 
 	// Return this vector of things that should be zero
 	return gScaling*gOutput;
@@ -516,16 +516,13 @@ Eigen::MatrixXd delg(Eigen::SparseMatrix<double> XZero) {
 	Eigen::MatrixXd gOutput(m, n);
 
 	// Cache X^2-X
-	//Eigen::SparseMatrix<double> GCached = XZero*XZero - XZero;
-
-	Eigen::SparseMatrix<double> XNorm = XZero;
+	Eigen::SparseMatrix<double> GCached = XZero*XZero - XZero;
 
 	// The derivative wrt each x
     #pragma omp parallel for
 	for (int i=0; i<n; i++) {
-		//gOutput(0, i) = 2*GCached.cwiseProduct(2*As[i]*XZero - As[i]).sum();
-		//gOutput(0, i) = trace(2*As[i]*XNorm - As[i]);
-		gOutput(0, i) = trace(As[i] - 2*As[i]*XNorm);
+		gOutput(0, i) = 2*GCached.cwiseProduct(2*As[i]*XZero - As[i]).sum();
+		//gOutput(0, i) = trace(As[i] - 2*As[i]*XZero);
 	}
 
 	// Return the gradient vector of g
@@ -547,8 +544,8 @@ Eigen::MatrixXd del2g(Eigen::SparseMatrix<double> XZero) {
 	for (int i=0; i<n; i++) {
 		Eigen::SparseMatrix<double> AsiXZero = 2*As[i]*XZero - As[i];
 		for (int j=0; j<n; j++) {
-			//gOutput(i, j) = 2*((2*As[j]*XZero - As[j]).cwiseProduct(AsiXZero).sum()) + 4*(GCached.cwiseProduct(As[i]*As[j]).sum());
-			gOutput(i, j) = trace(2*As[i]*As[j]);
+			gOutput(i, j) = 2*((2*As[j]*XZero - As[j]).cwiseProduct(AsiXZero).sum()) + 4*(GCached.cwiseProduct(As[i]*As[j]).sum());
+			//gOutput(i, j) = trace(2*As[i]*As[j]);
 		}
 	}
 
@@ -636,14 +633,54 @@ double deltaF(Eigen::MatrixXd deltaZ, Eigen::SparseMatrix<double> ZInverse, Eige
 
 }
 
-// Returns true if a matrix can be Cholesky decomposed TODO
+// Returns true if a matrix can be Cholesky decomposed
 bool isPD(Eigen::MatrixXd G) {
-	//return G.ldlt().info() != Eigen::NumericalIssue;
-	return G.eigenvalues().real().minCoeff() >= 0;
+	return G.llt().info() != Eigen::NumericalIssue;
+}
+bool isPSD(Eigen::MatrixXd G) {
+	return (G+(1e-13)*Eigen::MatrixXd::Identity(G.cols(), G.rows())).llt().info() != Eigen::NumericalIssue;
 }
 bool isComplexPD(Eigen::MatrixXcd G) {
-	//return G.ldlt().info() != Eigen::NumericalIssue;
-	return G.eigenvalues().real().minCoeff() >= 0;
+	return G.llt().info() != Eigen::NumericalIssue;
+}
+bool isComplexPSD(Eigen::MatrixXcd G) {
+	return (G+(1e-13)*Eigen::MatrixXcd::Identity(G.cols(), G.rows())).llt().info() != Eigen::NumericalIssue;
+}
+
+// Given a matrix, make it be positive definite
+void makePD(Eigen::MatrixXd G) {
+
+	// See if G is already PD
+	if (!isPD(G)) {
+
+		// If G+sigma*I is PD
+		double sigma = 1;
+		Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
+		if (isPD(G+sigma*I)) {
+
+			// Decrease sigma until it isn't
+			while (isPD(G+sigma*I) && sigma >= 1e-7) {
+				sigma /= 2;
+			}
+
+			// Then return to the one that was still PD
+			sigma *= 2;
+
+		// If G+sigma*I is not PD
+		} else {
+
+			// Increase sigma until it is
+			while (!isPD(G+sigma*I)) {
+				sigma *= 2;
+			}
+
+		}
+
+		// Update this new G
+		G = G+sigma*I;
+
+	}
+
 }
 
 // Standard cpp entry point
@@ -1379,11 +1416,10 @@ int main(int argc, char ** argv) {
 
 	}
 
-	// Gradient descent to make sure we start with an interior point TODO
+	// Gradient descent to make sure we start with an interior point
 	double v = 0;
-	//for (int i=0; i<10000000; i++) {
-	for (int i=0; i<10000; i++) {
-		XZero = X(x);
+	for (int i=0; i<10000000; i++) {
+		XZero = X(x, 0.0);
 		v = std::abs(g(XZero)(0) / gScaling);
 		if (outputMode == "") {
 			std::cout << "g(x) = " << v << std::endl;
@@ -1391,22 +1427,13 @@ int main(int argc, char ** argv) {
 		if (v < gThresh) {
 			break;
 		}
-		Eigen::VectorXd dir = -delg(XZero).row(0);
-		for (int j=0; j<10; j++) {
-			if (isPD(X(x+dir, 0.0))) {
-				break;
-			}
-			dir *= beta;
-		}
-		x += dir;
+		x -= delg(XZero).row(0);
 	}
 
 	// Get the full matrices from this
 	XZero = X(x, 0.0);
 	XCached = X(x);
 	XDense = Eigen::MatrixXd(XCached);
-
-	std::cout << "isPD = " << isPD(XZero) << std::endl;
 
 	// Output the initial X
 	if (outputMode == "") {
@@ -1429,6 +1456,13 @@ int main(int argc, char ** argv) {
 		}
 	}
 
+	// Some info about the initial X
+	std::cout << "" << std::endl;
+	std::cout << "|X^2-X|  = " << (XZero*XZero - XZero).squaredNorm() << std::endl;
+	std::cout << "tr(X^2-X)  = " << trace(XZero*XZero - XZero) << std::endl;
+	std::cout << "isPD(X) = " << isPD(XZero) << std::endl;
+	std::cout << "isPSD(X) = " << isPSD(XZero) << std::endl;
+
 	// Ensure this is an interior point
 	if (std::abs(g(XZero)(0) / gScaling) > gThresh) {
 		std::cerr << "Error - X should start as an interior point (g(x) = " << std::abs(g(XZero)(0) / gScaling) << " > gThresh)" << std::endl;
@@ -1440,17 +1474,17 @@ int main(int argc, char ** argv) {
 	}
 
 	// Initialise Z
-	Z = Eigen::MatrixXd::Zero(p, p);
-	for (int i=0; i<numMeasureB; i++) {
-		for (int j=0; j<numOutcomeB; j++) {
-			int currentLoc = (i*numOutcomeB + j) * d;
-			int copyLoc = (i*numOutcomeB + ((j+1) % numOutcomeB)) * d;
-			Z.block(currentLoc,currentLoc,d,d) = XCached.block(copyLoc,copyLoc,d,d);
-			Z.block(currentLoc+halfP,currentLoc+halfP,d,d) = XCached.block(copyLoc,copyLoc,d,d);
-			Z.block(currentLoc+halfP,currentLoc,d,d) = XCached.block(copyLoc+halfP,copyLoc,d,d);
-			Z.block(currentLoc,currentLoc+halfP,d,d) = -XCached.block(copyLoc+halfP,copyLoc,d,d);
-		}
-	}
+	//Z = Eigen::MatrixXd::Zero(p, p);
+	//for (int i=0; i<numMeasureB; i++) {
+		//for (int j=0; j<numOutcomeB; j++) {
+			//int currentLoc = (i*numOutcomeB + j) * d;
+			//int copyLoc = (i*numOutcomeB + ((j+1) % numOutcomeB)) * d;
+			//Z.block(currentLoc,currentLoc,d,d) = XCached.block(copyLoc,copyLoc,d,d);
+			//Z.block(currentLoc+halfP,currentLoc+halfP,d,d) = XCached.block(copyLoc,copyLoc,d,d);
+			//Z.block(currentLoc+halfP,currentLoc,d,d) = XCached.block(copyLoc+halfP,copyLoc,d,d);
+			//Z.block(currentLoc,currentLoc+halfP,d,d) = -XCached.block(copyLoc+halfP,copyLoc,d,d);
+		//}
+	//}
 
 	// Output the initial Z
 	//if (outputMode == "") {
@@ -1501,36 +1535,8 @@ int main(int argc, char ** argv) {
 		// Only calculate the full Hessian once, use a BFGS-like update later
 		G = del2L(XZero, y);
 
-		// See if G is already PD
-		if (!isPD(G)) {
-
-			// If G-sigma*I is PD
-			double sigma = 1;
-			Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
-			if (isPD(G-sigma*I)) {
-
-				// Decrease sigma until it isn't
-				while (isPD(G-sigma*I) && sigma >= 1e-7) {
-					sigma /= 2;
-				}
-
-				// Then return to the one that was still PD
-				sigma *= 2;
-
-			// If G-sigma*I is not PD
-			} else {
-
-				// Increase sigma until it is
-				while (!isPD(G-sigma*I)) {
-					sigma *= 2;
-				}
-
-			}
-
-			// Update this new G
-			G = G-sigma*I;
-
-		}
+		// Ensure it's positive definite
+		makePD(G);
 
 	}
 
@@ -1597,36 +1603,10 @@ int main(int argc, char ** argv) {
 				// Update G
 				G = del2L(XZero, y);
 
-				// See if G is already PD
-				if (!isPD(G)) {
+				std::cout << "G is PD = " << isPSD(G) << std::endl;
 
-					// If G-sigma*I is PD
-					double sigma = 1;
-					Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
-					if (isPD(G-sigma*I)) {
-
-						// Decrease sigma until it isn't
-						while (isPD(G-sigma*I) && sigma >= 1e-7) {
-							sigma /= 2;
-						}
-
-						// Then return to the one that was still PD
-						sigma *= 2;
-
-					// If G-sigma*I is not PD
-					} else {
-
-						// Increase sigma until it is
-						while (!isPD(G-sigma*I)) {
-							sigma *= 2;
-						}
-
-					}
-
-					// Update this new G
-					G = G-sigma*I;
-
-				}	
+				// Ensure it's positive definite
+				makePD(G);
 
 			}
 
@@ -1664,7 +1644,7 @@ int main(int argc, char ** argv) {
 			// Determine the max l such that beta^l = 1e-9
 			int maxL = std::log(epsilon) / std::log(beta);
 
-			// Get a base step size using the min eigenvalues TODO these aren't sorted
+			// Get a base step size using the min eigenvalues
 			double alphaBarX = -gammaVal / (XInverse * deltaX).eigenvalues().real().minCoeff();
 			double alphaBarZ = -gammaVal / (ZInverse * deltaZ).eigenvalues().real().minCoeff();
 			if (alphaBarX < 0) {
@@ -1720,6 +1700,7 @@ int main(int argc, char ** argv) {
 				XZero = X(x, 0.0);
 				A_0 = delg(XZero);
 				delfCached = delf(XZero);
+				ZSparse = Z.sparseView();
 
 				// Update G TODO maybe try L(new,new,new) - L(old,old,old)?
 				Eigen::VectorXd s = x - prevx;
@@ -1731,36 +1712,8 @@ int main(int argc, char ** argv) {
 				Eigen::VectorXd qBar = psi*q + (1-psi)*(G*s);
 				G = G - ((G*(s*(s.transpose()*G))) / (s.dot(G*s))) + ((qBar*qBar.transpose()) / (s.dot(qBar)));
 
-				// See if G is already PD
-				if (!isPD(G)) {
-
-					// If G-sigma*I is PD
-					double sigma = 1;
-					Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n, n);
-					if (isPD(G-sigma*I)) {
-
-						// Decrease sigma until it isn't
-						while (isPD(G-sigma*I) && sigma >= 1e-7) {
-							sigma /= 2;
-						}
-
-						// Then return to the one that was still PD
-						sigma *= 2;
-
-					// If G-sigma*I is not PD
-					} else {
-
-						// Increase sigma until it is
-						while (!isPD(G-sigma*I)) {
-							sigma *= 2;
-						}
-
-					}
-
-					// Update this new G
-					G = G-sigma*I;
-
-				}
+				// Ensure it's positive definite
+				makePD(G);
 
 			}
 			
@@ -1778,6 +1731,22 @@ int main(int argc, char ** argv) {
 
 	// Stop the timer
 	auto t2 = std::chrono::high_resolution_clock::now();
+
+	// Output the initial Z
+	if (outputMode == "") {
+		std::cout << "" << std::endl;
+		std::cout << "--------------------------------" << std::endl;
+		std::cout << "      Final Z " << std::endl;;
+		std::cout << "--------------------------------" << std::endl;
+		for (int i=0; i<numMeasureB; i++) {
+			for (int j=0; j<numOutcomeB; j++) {
+				int ind = (i*numOutcomeB + j)*d;
+				Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
+				std::cout << std::endl;
+				prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
+			}
+		}
+	}
 
 	// Extract the solution from X
 	if (outputMode == "") {
@@ -1809,7 +1778,6 @@ int main(int argc, char ** argv) {
 		std::cout << "          r(w) = " << rMagZero << " < " << epsilon << std::endl;;
 		std::cout << "         -f(x) = " << -f(XZero)/fScaling << " <= " << maxVal << std::endl;;
 		std::cout << "          g(x) = " << gCached(0)/gScaling << std::endl;;
-		std::cout << "          g(x) = " << trace(XZero*XZero-XZero) << std::endl;;
 		std::cout << "         -L(w) = " << -L(XZero, XCached, y, Z) << std::endl;;
 		std::cout << "         <X,Z> = " << XCached.cwiseProduct(ZSparse).sum() << std::endl;;
 		std::cout << "        y*g(x) = " << y.transpose()*g(XZero) << std::endl;;
