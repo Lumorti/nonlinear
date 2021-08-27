@@ -1723,18 +1723,51 @@ int main(int argc, char ** argv) {
 		}
 	}
 
-	// TODO check if this has nice values
-	//auto testTimer1 = std::chrono::high_resolution_clock::now();
-	//Eigen::MatrixXd test1 = del2f(XZero);
-	//auto testTimer2 = std::chrono::high_resolution_clock::now();
-	//std::cout << "test1 = " << std::chrono::duration_cast<std::chrono::milliseconds>(testTimer2-testTimer1).count() << " ms" << std::endl;
-	//testTimer1 = std::chrono::high_resolution_clock::now();
-	//Eigen::MatrixXd test2 = del2fNew(XZero);
-	//testTimer2 = std::chrono::high_resolution_clock::now();
-	//std::cout << "test2 = " << std::chrono::duration_cast<std::chrono::milliseconds>(testTimer2-testTimer1).count() << " ms" << std::endl;
-	//prettyPrint("del2f = ", test1);
-	//prettyPrint("del2fNew = ", test2);
-	//std::cout << "diff = " << (test2-test1).norm() << std::endl;
+	// Generete random interior points and see if del2f is PSD TODO
+	//for (int k=0; k<100; k++) {
+
+		//// Start with a bunch of projective measurements
+		//XDense = Eigen::MatrixXd::Zero(p,p);
+		//for (int i=0; i<numMeasureB; i++) {
+			//for (int j=0; j<numOutcomeB; j++) {
+
+				//// Start with a random normalized vector
+				//Eigen::VectorXcd vec = Eigen::VectorXcd::Random(d).normalized();
+
+				//// Turn it into a projective measurement
+				//Eigen::MatrixXcd tempMat = vec * vec.adjoint();
+
+				//// Copy it to the big matrix
+				//int ind = (i*numOutcomeB + j) * d;
+				//XDense.block(ind, ind, d, d) = tempMat.real();
+				//XDense.block(ind, ind+halfP, d, d) = tempMat.imag();
+
+			//}
+		//}
+
+		//// Extract the x from this X
+		//x = Xtox(XDense);
+
+		//// Gradient descent to make sure we start with an interior point
+		//double v = 0;
+		//for (int i=0; i<10000000; i++) {
+			//XZero = X(x, 0.0);
+			//v = std::abs(g(XZero)(0) / gScaling);
+			////if (outputMode == "") {
+				////std::cout << "g(x) = " << v << std::endl;
+			////}
+			//if (v < gThresh) {
+				//break;
+			//}
+			//x -= delg(XZero).row(0);
+		//}
+
+		//Eigen::MatrixXd grad = del2f(XZero);
+		//std::cout << std::endl << grad.eigenvalues() << std::endl;
+
+	//}
+
+	return 0;
 
 	// If using the BFGS update
 	if (useBFGS) {
