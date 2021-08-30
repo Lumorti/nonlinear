@@ -494,7 +494,7 @@ Eigen::MatrixXd del2fOld(Eigen::SparseMatrix<double> XZero) {
 
 }
 
-// Double differential of the objective function TODO 
+// Double differential of the objective function
 Eigen::MatrixXd del2f(Eigen::SparseMatrix<double> XZero) {
 
 	// Create an n by n matrix of all zeros
@@ -879,6 +879,7 @@ int main(int argc, char ** argv) {
 			std::cout << " -n [int]         set the number of measurements" << std::endl;
 			std::cout << " -c [int]         set how many cores to use" << std::endl;
 			std::cout << " -S [int]         use the BFGS update with a full update every this many iters" << std::endl;
+			std::cout << " -C               just run a convexity check" << std::endl;
 			std::cout << "                        " << std::endl;
 			std::cout << "       output options          " << std::endl;
 			std::cout << " -p [int]         set the precision" << std::endl;
@@ -938,6 +939,11 @@ int main(int argc, char ** argv) {
 		// If told to use a random start rather than the default seed
 		} else if (arg == "-R") {
 			initMode = "random";
+
+		// If told to use a random start rather than the default seed
+		} else if (arg == "-C") {
+			initMode = "convex";
+			outputMode = "convex";
 
 		// If told to use near the known exact
 		} else if (arg == "-Y") {
@@ -1217,6 +1223,25 @@ int main(int argc, char ** argv) {
 
 	}
 	B.setFromTriplets(tripsB.begin(), tripsB.end());
+
+	// Cache whether each A matrix has non zero elements at a certain matrix index
+	startEndA = -Eigen::MatrixXi::Ones(numMeasureB*numOutcomeB, 2);
+	for (int i=0; i<numMeasureB; i++) {
+		for (int k=0; k<numOutcomeB; k++) {
+			for (int b=0; b<n; b++) {
+				int ind1 = i*numOutcomeB + k;
+				int r1 = ind1*d;
+				Eigen::SparseMatrix<double> BReal1 = As[b].block(r1,r1,d,d);
+				Eigen::SparseMatrix<double> BImag1 = As[b].block(r1+halfP,r1,d,d);
+				if (BReal1.nonZeros() + BImag1.nonZeros() != 0) {
+					if (startEndA(ind1, 0) == -1) {
+						startEndA(ind1, 0) = b;
+					}
+					startEndA(ind1, 1) = b+1;
+				}
+			}
+		}
+	}
 
 	// The interior point to optimise
 	Eigen::VectorXd x = Eigen::VectorXd::Zero(n);
@@ -1589,6 +1614,84 @@ int main(int argc, char ** argv) {
 		// Then this X into an x
 		x = Xtox(XDense);
 
+	} 
+	
+	// View part of the search space TODO
+	if (outputMode == "convex") {
+
+		// Start with a bunch of projective measurements
+		for (int i=0; i<numMeasureB; i++) {
+			for (int j=0; j<numOutcomeB; j++) {
+
+				// Start with a random normalized vector
+				Eigen::VectorXcd vec = Eigen::VectorXcd::Random(d).normalized();
+
+				// Turn it into a projective measurement
+				Eigen::MatrixXcd tempMat = vec * vec.adjoint();
+
+				// Copy it to the big matrix
+				int ind = (i*numOutcomeB + j) * d;
+				XDense.block(ind, ind, d, d) = tempMat.real();
+				XDense.block(ind, ind+halfP, d, d) = tempMat.imag();
+
+			}
+		}
+
+		// Extract the x from this X
+		x = Xtox(XDense);
+
+		// Make it an interior point
+		double v = 0;
+		for (int i=0; i<10000000; i++) {
+			XZero = X(x, 0.0);
+			v = std::abs(g(XZero)(0) / gScaling);
+			if (v < gThresh) {
+				break;
+			}
+			x -= delg(XZero).row(0);
+		}
+
+		// Save this og val
+		Eigen::VectorXd oldx = x;
+
+		int x1 = 0;
+		int x2 = 3;
+		double minDel = -1.0;
+		double maxDel = 1.0;
+		double stepsPer = 50;
+		double delPer = (maxDel-minDel) / stepsPer;
+		Eigen::MatrixXd delVec = Eigen::MatrixXd::Zero(m, n);
+
+		// Look either side of the point
+		for (double del1=minDel; del1<maxDel; del1+=delPer) {
+			for (double del2=minDel; del2<maxDel; del2+=delPer) {
+
+				// Adjust it from the og
+				x(x1) = oldx(x1) + del1;
+				x(x2) = oldx(x2) + del2;
+
+				// Make it an interior point
+				double v = 0;
+				for (int i=0; i<1000; i++) {
+					XZero = X(x, 0.0);
+					v = std::abs(g(XZero)(0) / gScaling);
+					if (v < gThresh) {
+						break;
+					}
+					delVec = delg(XZero);
+					x(x1) -= delVec(0,x1);
+					x(x2) -= delVec(0,x2);
+				}
+
+				// Output g(x) and f(x)
+				std::cout << x(x1) << " " << x(x2) << " " << f(X(x, 0.0)) << std::endl;
+
+			}
+		}
+
+		// Then stop
+		return 0;
+
 	}
 
 	// Gradient descent to make sure we start with an interior point
@@ -1704,70 +1807,7 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd deltay = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd deltaZ = Eigen::MatrixXd::Zero(p, p);
 
-	// Cache whether each A matrix has non zero elements at a certain matrix index
-	startEndA = -Eigen::MatrixXi::Ones(numMeasureB*numOutcomeB, 2);
-	for (int i=0; i<numMeasureB; i++) {
-		for (int k=0; k<numOutcomeB; k++) {
-			for (int b=0; b<n; b++) {
-				int ind1 = i*numOutcomeB + k;
-				int r1 = ind1*d;
-				Eigen::SparseMatrix<double> BReal1 = As[b].block(r1,r1,d,d);
-				Eigen::SparseMatrix<double> BImag1 = As[b].block(r1+halfP,r1,d,d);
-				if (BReal1.nonZeros() + BImag1.nonZeros() != 0) {
-					if (startEndA(ind1, 0) == -1) {
-						startEndA(ind1, 0) = b;
-					}
-					startEndA(ind1, 1) = b+1;
-				}
-			}
-		}
-	}
-
-	// Generete random interior points and see if del2f is PSD TODO
-	//for (int k=0; k<100; k++) {
-
-		//// Start with a bunch of projective measurements
-		//XDense = Eigen::MatrixXd::Zero(p,p);
-		//for (int i=0; i<numMeasureB; i++) {
-			//for (int j=0; j<numOutcomeB; j++) {
-
-				//// Start with a random normalized vector
-				//Eigen::VectorXcd vec = Eigen::VectorXcd::Random(d).normalized();
-
-				//// Turn it into a projective measurement
-				//Eigen::MatrixXcd tempMat = vec * vec.adjoint();
-
-				//// Copy it to the big matrix
-				//int ind = (i*numOutcomeB + j) * d;
-				//XDense.block(ind, ind, d, d) = tempMat.real();
-				//XDense.block(ind, ind+halfP, d, d) = tempMat.imag();
-
-			//}
-		//}
-
-		//// Extract the x from this X
-		//x = Xtox(XDense);
-
-		//// Gradient descent to make sure we start with an interior point
-		//double v = 0;
-		//for (int i=0; i<10000000; i++) {
-			//XZero = X(x, 0.0);
-			//v = std::abs(g(XZero)(0) / gScaling);
-			////if (outputMode == "") {
-				////std::cout << "g(x) = " << v << std::endl;
-			////}
-			//if (v < gThresh) {
-				//break;
-			//}
-			//x -= delg(XZero).row(0);
-		//}
-
-		//Eigen::MatrixXd grad = del2f(XZero);
-		//std::cout << std::endl << grad.eigenvalues() << std::endl;
-
-	//}
-
-	return 0;
+	
 
 	// If using the BFGS update
 	if (useBFGS) {
