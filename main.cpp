@@ -35,11 +35,12 @@ double gThresh = 1e-15;
 int numCores = 1;
 bool useBFGS = true;
 int BFGSFreq = 5;
+double BFGSmaxG = 1e-2;
 
 // Parameters between 0 and 1
 double gammaVal = 0.99;
 double epsilonZero = 0.9;
-double beta = 0.9;
+double beta = 0.1;
 
 // Parameters greater than 0
 double epsilon = 1e-5; 
@@ -69,6 +70,8 @@ int halfP = p / 2;
 // For printing
 int precision = 5;
 std::string outputMode = "";
+int x1 = 0;
+int x2 = 1;
 
 // Pretty print a generic 1D vector
 template <typename type> void prettyPrint(std::string pre, std::vector<type> arr) {
@@ -878,8 +881,7 @@ int main(int argc, char ** argv) {
 			std::cout << " -d [int]         set the dimension" << std::endl;
 			std::cout << " -n [int]         set the number of measurements" << std::endl;
 			std::cout << " -c [int]         set how many cores to use" << std::endl;
-			std::cout << " -S [int]         use the BFGS update with a full update every this many iters" << std::endl;
-			std::cout << " -C               just run a convexity check" << std::endl;
+			std::cout << " -V [int] [int]   visualise the search space" << std::endl;
 			std::cout << "                        " << std::endl;
 			std::cout << "       output options          " << std::endl;
 			std::cout << " -p [int]         set the precision" << std::endl;
@@ -887,10 +889,11 @@ int main(int argc, char ** argv) {
 			std::cout << "                        " << std::endl;
 			std::cout << "       init options          " << std::endl;
 			std::cout << " -R               use a random seed" << std::endl;
-			std::cout << " -Y               use nearby the ideal if known" << std::endl;
+			std::cout << " -Y               start nearby the ideal if known" << std::endl;
 			std::cout << " -T [dbl]         set the threshold for the initial g(x)" << std::endl;
 			std::cout << "                        " << std::endl;
 			std::cout << "    parameter options          " << std::endl;
+			std::cout << " -S [dbl]         set max g(x) for BFGS" << std::endl;
 			std::cout << " -e [dbl]         set epsilon" << std::endl;
 			std::cout << " -M [dbl]         set M_c" << std::endl;
 			std::cout << " -b [dbl]         set beta" << std::endl;
@@ -919,7 +922,7 @@ int main(int argc, char ** argv) {
 		// Use the BFGS update method
 		} else if (arg == "-S") {
 			useBFGS = true;
-			BFGSFreq = std::stoi(argv[i+1]);
+			BFGSmaxG = std::stod(argv[i+1]);
 			i += 1;
 
 		// Set the number of cores 
@@ -940,10 +943,13 @@ int main(int argc, char ** argv) {
 		} else if (arg == "-R") {
 			initMode = "random";
 
-		// If told to use a random start rather than the default seed
-		} else if (arg == "-C") {
-			initMode = "convex";
-			outputMode = "convex";
+		// Visualise part of the search space
+		} else if (arg == "-V") {
+			initMode = "vis";
+			outputMode = "vis";
+			x1 = std::stoi(argv[i+1]);
+			x2 = std::stoi(argv[i+2]);
+			i += 2;
 
 		// If told to use near the known exact
 		} else if (arg == "-Y") {
@@ -1617,7 +1623,7 @@ int main(int argc, char ** argv) {
 	} 
 	
 	// View part of the search space TODO
-	if (outputMode == "convex") {
+	if (outputMode == "vis") {
 
 		// Start with a bunch of projective measurements
 		for (int i=0; i<numMeasureB; i++) {
@@ -1654,11 +1660,10 @@ int main(int argc, char ** argv) {
 		// Save this og val
 		Eigen::VectorXd oldx = x;
 
-		int x1 = 0;
-		int x2 = 3;
+		// Settings for the vis
 		double minDel = -1.0;
 		double maxDel = 1.0;
-		double stepsPer = 50;
+		double stepsPer = 20;
 		double delPer = (maxDel-minDel) / stepsPer;
 		Eigen::MatrixXd delVec = Eigen::MatrixXd::Zero(m, n);
 
@@ -1807,8 +1812,6 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd deltay = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd deltaZ = Eigen::MatrixXd::Zero(p, p);
 
-	
-
 	// If using the BFGS update
 	if (useBFGS) {
 
@@ -1872,9 +1875,8 @@ int main(int argc, char ** argv) {
 			delfCached = delf(XZero);
 			delLCached = delL(y, ZSparse, delfCached, A_0);
 
-			// TODO adaptive, use BFGS if g(x) < 1e-5 
 			// If not doing BFGS, need to do a full re-calc of G
-			if (!useBFGS || totalInner % BFGSFreq == 0) {
+			if (!useBFGS || gCached(0)/gScaling > BFGSmaxG) {
 
 				// Update G
 				G = del2L(XZero, y);
@@ -2053,16 +2055,21 @@ int main(int argc, char ** argv) {
 		std::cout << "         <X,Z> = " << XCached.cwiseProduct(ZSparse).sum() << std::endl;;
 		std::cout << "           |y| = " << y.norm() << std::endl;;
 		std::cout << "      y^T*g(x) = " << y.transpose()*g(XZero) << std::endl;;
-		std::cout << "     |delf(w)| = " << delfCached.norm()/fScaling << std::endl;;
+		std::cout << "     |delf(x)| = " << delfCached.norm()/fScaling << std::endl;;
 		std::cout << "     |delL(w)| = " << delLCached.norm() << std::endl;;
-		std::cout << "     |delg(w)| = " << A_0.norm()/gScaling << std::endl;;
-		std::cout << "           |G| = " << G.norm()/gScaling << std::endl;;
+		std::cout << "     |delg(x)| = " << A_0.norm()/gScaling << std::endl;;
 		std::cout << "   total inner = " << totalInner << std::endl;;
 		std::cout << "    time taken = " << std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count() << " ms" << std::endl;
 
+		// TODO DEBUG
+		prettyPrint("delL(x) = ", delLCached);
+		prettyPrint("delf(x) = ", delfCached);
+		prettyPrint("delg(x) = ", A_0);
+		prettyPrint("delg(x)*y = ", Eigen::MatrixXd(A_0.transpose()*y));
+
 	// Benchmarking mode
 	} else if (outputMode == "B") {
-		std::cout << totalInner << std::endl;;
+		std::cout << totalInner << std::endl;
 
 	}
 

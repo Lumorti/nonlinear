@@ -12,7 +12,7 @@
 For a given dimension $d$, number of sets $s$ and a series of measurements $M_i^k \in \mathbb{C}^d \otimes \mathbb{C}^d$ our problem is as follows:
 
 \begin{align}
-	\text{min} \sum_{i,j}^s \sum_{k,l}^d -\sqrt{1-\text{tr}(M_k^i M_l^j)} 
+	\text{min} -\sum_{i<j}^s \sum_{k,l}^d \sqrt{1-\text{tr}(M_k^i M_l^j)} 
 \end{align}
 
 subject to:
@@ -53,58 +53,47 @@ Many of these elements are defined in relation to others such that the vector $x
 Splitting the objective function into real and imaginary components and using the identity $\text{tr}(M_k^i M_l^j) = M_k^i \cdot M_l^j$:
 
 \begin{equation}
-	f(x) = \sum_{i,j}^s \sum_{k,l}^d -\sqrt{1 - R_k^i \cdot R_l^j + I_k^i \cdot I_l^j}
+	f(x) = -\sum_{i<j}^s \sum_{k,l}^d \sqrt{1 - R_k^i \cdot R_l^j + I_k^i \cdot I_l^j}
 \end{equation}
 
 Now defining the extraction matrices $C_k^i$, $D_k^i$, $E_k^i$ and $F_k^i$ such that $C_k^i X D_k^i = R_k^i$ and $E_k^i X F_k^i = I_k^i$ with the notation that $X = X(x)$:
 
 \begin{equation}
-	f(x) = \sum_{i,j}^s \sum_{k,l}^d -\sqrt{1 - C_k^i X D_k^i \cdot C_l^j X D_l^j + E_k^i X F_k^i \cdot E_l^j X F_l^j} 
+	f(x) = -\sum_{i<j}^s \sum_{k,l}^d \sqrt{1 - C_k^i X D_k^i \cdot C_l^j X D_l^j + E_k^i X F_k^i \cdot E_l^j X F_l^j} 
 \end{equation}
 
-Thus the full expression in terms of the components of $x$: 
+Now taking the first derivative of this, letting $d_{kl}^{ij}$ be the value inside the above square root:
 
 \begin{align}
-	f(x) = \sum_{i,j}^s \sum_{k,l}^d -\bigg(1 - C_k^i (\sum_a^n x_a A_a + B) D_k^i \cdot C_l^j (\sum_a^n x_a A_a + B) D_l^j \\
-	+ E_k^i (\sum_a^n x_a A_a + B) F_k^i \cdot E_l^j (\sum_a^n x_a A_a + B) F_l^j\bigg)^{\frac{1}{2}} 
-\end{align}
-
-Now taking the first derivative of this, letting $d_k^i$ be the value inside the above square root:
-
-\begin{align}
-	\frac{\partial f(x)}{\partial x_b} = \sum_{i,j}^s \sum_{k,l}^d -\frac{1}{2}(d_k^i)^{-\frac{1}{2}}(-C_k^i A_b D_k^i \cdot C_l^j X D_l^j - C_k^i X D_k^i \cdot C_l^j A_b D_l^j \\
+	\frac{\partial f(x)}{\partial x_b} = -\sum_{i<j}^s \sum_{k,l}^d \frac{1}{2}(d_{kl}^{ij})^{-\frac{1}{2}}(-C_k^i A_b D_k^i \cdot C_l^j X D_l^j - C_k^i X D_k^i \cdot C_l^j A_b D_l^j \\
 	+ E_k^i A_b F_k^i \cdot E_l^j X F_l^j + E_k^i X F_k^i \cdot E_l^j A_b F_l^j) 
 \end{align}
 
 Then the second derivative, remembering that $d_k^i$ has a dependence on $x$:
 
 \begin{align}
-	\frac{\partial^2 f(x)}{\partial x_b \partial x_c} = \sum_{i,j}^s \sum_{k,l}^d \frac{1}{4}(d_k^i)^{-\frac{3}{2}}(-C_k^i A_b D_k^i \cdot C_l^j X D_l^j - C_k^i X D_k^i \cdot C_l^j A_b D_l^j \\
+	\frac{\partial^2 f(x)}{\partial x_b \partial x_c} = \sum_{i<j}^s \sum_{k,l}^d \frac{1}{4}(d_{kl}^{ij})^{-\frac{3}{2}}(-C_k^i A_b D_k^i \cdot C_l^j X D_l^j - C_k^i X D_k^i \cdot C_l^j A_b D_l^j \\
 	+ E_k^i A_b F_k^i \cdot E_l^j X F_l^j + E_k^i X F_k^i \cdot E_l^j A_b F_l^j) \\
 	(-C_k^i A_c D_k^i \cdot C_l^j X D_l^j - C_k^i X D_k^i \cdot C_l^j A_c D_l^j \\
 	+ E_k^i A_c F_k^i \cdot E_l^j X F_l^j + E_k^i X F_k^i \cdot E_l^j A_c F_l^j) \\
-	-\frac{1}{2}(d_k^i)^{-\frac{1}{2}}(-C_k^i A_b D_k^i \cdot C_l^j A_c D_l^j - C_k^i A_c D_k^i \cdot C_l^j A_b D_l^j \\
+	-\frac{1}{2}(d_{kl}^{ij})^{-\frac{1}{2}}(-C_k^i A_b D_k^i \cdot C_l^j A_c D_l^j - C_k^i A_c D_k^i \cdot C_l^j A_b D_l^j \\
 	+ E_k^i A_b F_k^i \cdot E_l^j A_c F_l^j + E_k^i A_c F_k^i \cdot E_l^j A_b F_l^j)
 \end{align}
 
-Note that in the above expressions many of these terms are zero, for instance $C_k^i A_b D_k^i \cdot C_l^j A_b D_l^j = 0$ since each A matrix will only have non-zero components for a single measurement, so one of those two extractions must result in a zero matrix.
 
-Computationally many things here are different, such that $X$ is only ever calculated once per iteration and the extraction matrices are unneeded, instead the submatrices are extracted directly from the cached $X$ using Eigen's ``X.block()'' routine, which claims $O(0)$ scaling when compiled with optimisations.
+Computationally many things here are different, such that $X$ is only ever calculated once per iteration and the extraction matrices are unneeded, instead the submatrices are extracted directly from the cached $X$ using Eigen's ``X.block()'' routine, which claims $O(0)$ scaling when compiled with optimisations. Note that in the above expressions many of these terms are zero, for instance $C_k^i A_b D_k^i \cdot C_l^j A_b D_l^j = 0$ since each A matrix will only have non-zero components for a single measurement, so one of those two extractions must result in a zero matrix.
 
 In order to enforce that the measurements are projectors we define the constraint function $g(x)$:
 
 \begin{align}
-	G(x) &= X^2 - X \\
-	&= \left(\sum_i A_i x_i + B\right)^2 - \sum_i A_i x_i - B \\
-	\\
-	g(x) &= |G(x)|^2 \\
-	&= G(x) \cdot G(x)
+	g(x) &= |X^2 - X|^2 \\
+		 &= (X^2 - X) \cdot (X^2 - X)
 \end{align}
 
 And its first derivative:
 
 \begin{align}
-	\frac{\partial g(x)}{\partial x_b} &= 2 G(x) \cdot \frac{\partial G(x)}{\partial x_b} \\
+	\frac{\partial g(x)}{\partial x_b} &= 2 (X^2 - X) \cdot \frac{\partial }{\partial x_b} (X^2 - X)  \\
 									   &= 2 (X^2 - X) \cdot (2 A_b X - A_b)
 \end{align}
 
@@ -119,6 +108,62 @@ And its second derivative:
 
 Putting these all together we can construct the Lagrangian and it's first/second derivatives, which are then used as in the paper.
 
+\begin{align}
+	L(x) = f(x) - y g(x) - X \cdot Z
+\end{align}
+
+\begin{align}
+	\nabla L(x) = \nabla f(x) - y \nabla g(x) - \nabla (X \cdot Z)
+\end{align}
+
+Now for a KKT point:
+
+\begin{align}
+	\nabla L(x) = 0 \qquad \text{and} \qquad g(x) &= 0 \qquad \text{and} \qquad Z = 0 \\
+	\implies \nabla f(x) &= 0
+\end{align}
+
+\begin{align}
+	\text{for} \qquad b = {1,...,n} \\
+	\sum_{i<j}^s \sum_{k,l}^d (d_{kl}^{ij})^{-\frac{1}{2}}(-C_k^i A_b D_k^i \cdot C_l^j X D_l^j - C_k^i X D_k^i \cdot C_l^j A_b D_l^j \\
+	+ E_k^i A_b F_k^i \cdot E_l^j X F_l^j + E_k^i X F_k^i \cdot E_l^j A_b F_l^j)  = 0 \\
+	\implies \sum_{i<j}^s \sum_{k,l}^d (d_{kl}^{ij})^{-\frac{1}{2}}(-C_k^i A_1 D_k^i \cdot C_l^j X D_l^j - C_k^i X D_k^i \cdot C_l^j A_1 D_l^j \\
+	+ E_k^i A_1 F_k^i \cdot E_l^j X F_l^j + E_k^i X F_k^i \cdot E_l^j A_1 F_l^j)  = 0
+\end{align}
+
+This $A_1$ only has non-zero components in the real section and for $i = 1$:
+
+\begin{align}
+	\sum_{j\ne 1}^s \sum_{k,l}^d (d_{kl}^{1j})^{-\frac{1}{2}} C_k^1 A_1 D_k^1 \cdot C_l^j X D_l^j = 0
+\end{align}
+
+This $A_1$ is also only non-zero for $k = 1$ and $k = d$:
+
+\begin{align}
+	\sum_{j\ne 1}^s \sum_{l}^d [(d_{1l}^{1j})^{-\frac{1}{2}} C_1^1 A_1 D_1^1 \cdot C_l^j X D_l^j + (d_{dl}^{1j})^{-\frac{1}{2}} C_d^1 A_1 D_d^1 \cdot C_l^j X D_l^j ] = 0
+\end{align}
+
+Moving things as far out of the sum as we can and using that $C_1^1 A_1 D_1^1 = -C_d^1 A_1 D_d^1$:
+
+\begin{align}
+	C_1^1 A_1 D_1^1 \cdot \sum_{j\ne 1}^s \sum_{l}^d ~ [ (d_{1l}^{1j})^{-\frac{1}{2}} - (d_{dl}^{1j})^{-\frac{1}{2}}] ~ C_l^j X D_l^j = 0
+\end{align}
+
+Since this can be repeated for all the A matrices referring to the real parts of measurement matrix 1, each of which are linearly independent, all of the components of the quantity on the right must equal zero:
+
+\begin{align}
+	\sum_{j\ne 1}^s \sum_{l}^d ~ [ (d_{1l}^{1j})^{-\frac{1}{2}} - (d_{dl}^{1j})^{-\frac{1}{2}}] ~ C_l^j X D_l^j = 0
+\end{align}
+
+Repeating for other matrices, real and imaginary components:
+
+\begin{align}
+	\text{for} \qquad i \in {1,...,s} \qquad k \in {1,...,d-1} \\
+	\sum_{j\ne i}^s \sum_{l}^d ~ [ (d_{kl}^{ij})^{-\frac{1}{2}} - (d_{dl}^{ij})^{-\frac{1}{2}}] ~ C_l^j X D_l^j = 0 \\
+	\sum_{j\ne i}^s \sum_{l}^d ~ [ (d_{kl}^{ij})^{-\frac{1}{2}} - (d_{dl}^{ij})^{-\frac{1}{2}}] ~ E_l^j X F_l^j = 0
+\end{align}
+
+For the optimal MUB measurements all $d_{kl}^{ij} = 1-1/d$, now I need to try to find an example of the above being true without the optimal
 
 
 \end{document}
