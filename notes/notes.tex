@@ -149,7 +149,7 @@ Moving things as far out of the sum as we can and using that $C_1^1 A_1 D_1^1 = 
 	C_1^1 A_1 D_1^1 \cdot \sum_{j\ne 1}^s \sum_{l}^d ~ [ (d_{1l}^{1j})^{-\frac{1}{2}} - (d_{dl}^{1j})^{-\frac{1}{2}}] ~ C_l^j X D_l^j = 0
 \end{align}
 
-Since this can be repeated for all the A matrices referring to the real parts of measurement matrix 1, each of which are linearly independent, all of the components of the quantity on the right must equal zero:
+Since this can be repeated for all the A matrices referring to the real parts of measurement matrix 1, each of which are linearly independent, all of the components of the sum on the right must equal zero:
 
 \begin{align}
 	\sum_{j\ne 1}^s \sum_{l}^d ~ [ (d_{1l}^{1j})^{-\frac{1}{2}} - (d_{dl}^{1j})^{-\frac{1}{2}}] ~ C_l^j X D_l^j = 0
@@ -163,7 +163,6 @@ Repeating for other matrices, real and imaginary components:
 	\sum_{j\ne i}^s \sum_{l}^d ~ [ (d_{kl}^{ij})^{-\frac{1}{2}} - (d_{dl}^{ij})^{-\frac{1}{2}}] ~ E_l^j X F_l^j = 0
 \end{align}
 
-For the optimal MUB measurements all $d_{kl}^{ij} = 1-1/d$, now I need to try to find an example of the above being true without the optimal
-
+For non-zero X (the non-trivial solution) this implies the d's are all equal and thus the moments are equal. Also requiring that $g(x) = 0$ means the matrices have to be projective so therefore the only solution is when each $d_{kl}^{ij} = 1-1/d$, thus $\nabla f(x) = 0 \implies \text{MUBs}$. This also means that there exist no local minima, however the search space is still convex since it consists of many disconnected convex regions which all have the same local/global minima which are all stationary points, assuming MUBs. In the no MUB case there are no stationary points but the local minima also seem to be the global.
 
 \end{document}

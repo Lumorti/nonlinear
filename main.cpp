@@ -35,7 +35,7 @@ double gThresh = 1e-15;
 int numCores = 1;
 bool useBFGS = true;
 int BFGSFreq = 5;
-double BFGSmaxG = 1e-2;
+double BFGSmaxG = 20;
 
 // Parameters between 0 and 1
 double gammaVal = 0.99;
@@ -2055,17 +2055,14 @@ int main(int argc, char ** argv) {
 		std::cout << "         <X,Z> = " << XCached.cwiseProduct(ZSparse).sum() << std::endl;;
 		std::cout << "           |y| = " << y.norm() << std::endl;;
 		std::cout << "      y^T*g(x) = " << y.transpose()*g(XZero) << std::endl;;
-		std::cout << "     |delf(x)| = " << delfCached.norm()/fScaling << std::endl;;
+		std::cout << "     |delf(x)| = " << (delfCached/fScaling).norm() << std::endl;;
 		std::cout << "     |delL(w)| = " << delLCached.norm() << std::endl;;
-		std::cout << "     |delg(x)| = " << A_0.norm()/gScaling << std::endl;;
+		std::cout << "     |delg(x)| = " << (A_0/gScaling).norm() << std::endl;;
+		std::cout << "    |del2f(x)| = " << (del2f(XZero)/fScaling).norm() << std::endl;;
+		std::cout << "    |del2L(w)| = " << G.norm() << std::endl;;
+		std::cout << "    |del2g(x)| = " << (del2g(XZero)/gScaling).norm() << std::endl;;
 		std::cout << "   total inner = " << totalInner << std::endl;;
 		std::cout << "    time taken = " << std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count() << " ms" << std::endl;
-
-		// TODO DEBUG
-		prettyPrint("delL(x) = ", delLCached);
-		prettyPrint("delf(x) = ", delfCached);
-		prettyPrint("delg(x) = ", A_0);
-		prettyPrint("delg(x)*y = ", Eigen::MatrixXd(A_0.transpose()*y));
 
 	// Benchmarking mode
 	} else if (outputMode == "B") {

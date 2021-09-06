@@ -1,5 +1,5 @@
 # Fdb version 3
-["pdflatex"] 1630536374 "notes.tex" "notes.pdf" "notes" 1630536374
+["pdflatex"] 1630939731 "notes.tex" "notes.pdf" "notes" 1630939731
   "/etc/texmf/web2c/texmf.cnf" 1624809246 475 c0e671620eb5563b2130f56340a5fde8 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex7.tfm" 1246382020 1004 54797486969f23fa377b128694d548df ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam10.tfm" 1246382020 916 f87d7c45f9c908e672703b83b72241a3 ""
@@ -33,9 +33,9 @@
   "/usr/share/texmf/web2c/texmf.cnf" 1581979058 38841 ce3692aa899bb693b90b87eaa5d4d84e ""
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1624809251 75955 f78456fd1308dc295dc476a68e28d85b ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1624809254 4791332 d46db5170ed7e7d3a029a0393c0e790d ""
-  "notes.aux" 1630536374 8 a94a2480d3289e625eea47cd1b285758 "pdflatex"
-  "notes.tex" 1630536373 7859 0de60e9e4713ddcbc69d25c5d3aae1ed ""
+  "notes.aux" 1630939731 8 a94a2480d3289e625eea47cd1b285758 "pdflatex"
+  "notes.tex" 1630939731 8341 503927de7d10902f94b14c15a6f159df ""
   (generated)
+  "notes.log"
   "notes.pdf"
   "notes.aux"
-  "notes.log"
