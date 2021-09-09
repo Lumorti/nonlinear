@@ -52,6 +52,8 @@ int numMeasureB = 0;
 int numOutcomeB = 0;
 int numUniquePer = 0;
 int numMats = 0;
+int numRhoMats = 0;
+int numBMats = 0;
 Eigen::SparseMatrix<std::complex<double>> A;
 Eigen::VectorXcd b;
 Eigen::SparseMatrix<std::complex<double>> Q;
@@ -216,23 +218,66 @@ std::complex<double> trace(Eigen::SparseMatrix<std::complex<double>> A) {
 
 }
 
-// Function turning X to x TODO
+// Function turning X to x
 Eigen::VectorXcd matToVec(Eigen::SparseMatrix<std::complex<double>> X) {
 
 	// Create a blank n vector
 	Eigen::VectorXcd newVec(n);
+
+	// Loop over all non-zero elements
+	for (int k=0; k<X.outerSize(); ++k) {
+		for (Eigen::SparseMatrix<std::complex<double>>::InnerIterator it(X,k); it; ++it) {
+
+			// Only consider the upper triangle
+			if (it.col() >= it.row()) {
+
+				// Get the location in the local block matrix
+				int matInd = std::floor(it.col() / d);
+				int matx = std::floor(it.col() % d);
+				int maty = std::floor(it.row() % d);
+
+				// Convert the mat loc to a vec loc
+				int vecLoc = matx + maty*(2*d-1-maty);
+
+				// Set the vector value
+				newVec(matInd*numUniquePer+vecLoc) = it.value();
+
+			}
+
+		}
+	}
 
 	// Return this new vector
 	return newVec;
 
 }
 
-// Function turning x to X TODO
+// Function turning x to X
 Eigen::SparseMatrix<std::complex<double>> vecToMat(Eigen::VectorXcd x) {
 
 	// Create a blank p by p matrix
 	Eigen::SparseMatrix<std::complex<double>> newMat(p, p);
 
+	// For each section of the vec representing a matrix
+	int matx = 0;
+	int maty = 0;
+	std::vector<Eigen::Triplet<std::complex<double>>> tripsNew;
+	for (int i=0; i<numMats; i++) {
+		for (int j=0; j<numUniquePer; j++) {
+			tripsNew.push_back(Eigen::Triplet<std::complex<double>>(i*d+matx, i*d+maty, x(i*numUniquePer+j)));
+			tripsNew.push_back(Eigen::Triplet<std::complex<double>>(i*d+maty, i*d+matx, std::conj(x(i*numUniquePer+j))));
+			matx++;
+			if (matx >= d) {
+				maty++;
+				matx = maty;
+			}
+		}
+
+	}
+
+	// Construct the matrix from these triplets
+	newMat.setFromTriplets(tripsNew.begin(), tripsNew.end());
+	
 	// Return this new matrix
 	return newMat;
 
@@ -245,12 +290,14 @@ double f(Eigen::VectorXcd x) {
 
 // Derivative of the objective function
 Eigen::VectorXcd delf(Eigen::VectorXcd x) {
-	return x.adjoint()*(Q + Q.adjoint());
+	Eigen::SparseMatrix<std::complex<double>> adj = Q.adjoint();
+	return x.adjoint()*(Q + adj);
 }
 
 // Second derivative of the objective function
 Eigen::MatrixXcd del2f(Eigen::VectorXcd x) {
-	return Q + Q.adjoint();
+	Eigen::SparseMatrix<std::complex<double>> adj = Q.adjoint();
+	return Q + adj;
 }
 				
 // Constraint function
@@ -259,8 +306,11 @@ Eigen::VectorXcd g(Eigen::VectorXcd x) {
 	// Create an empty vector
 	Eigen::VectorXcd returnVec(m);
 
+	// Need numMats to be in "vector" form (size 1 vector)
+	Eigen::VectorXcd N = Eigen::VectorXcd::Constant(1, numMats);
+
 	// First element is the x^Tx = N constraint
-	returnVec.head(1) = (x.adjoint()*x).real()(0) - N;
+	returnVec.head(1) = x.adjoint()*x - N;
 
 	// Last m-1 elements are the normalisation constraints
 	returnVec.tail(m-1) = A*x - b;
@@ -277,13 +327,13 @@ Eigen::MatrixXcd delg(Eigen::VectorXcd x) {
 	Eigen::MatrixXcd returnMat(n, m);
 
 	// First element is the x^Tx = N constraint
-	returnVec.block(0,0,1,n) = 2*x;
+	returnMat.block(0,0,1,n) = 2*x;
 
 	// Last m-1 elements are the normalisation constraints
-	returnVec.block(1,0,n,n) = A;
+	returnMat.block(1,0,n,n) = A;
 
 	// Return the vector of constraints
-	return returnVec;
+	return returnMat;
 
 }
 
@@ -291,16 +341,15 @@ Eigen::MatrixXcd delg(Eigen::VectorXcd x) {
 std::vector<Eigen::MatrixXcd> del2g(Eigen::VectorXcd x) {
 
 	// Create an empty 3D matrix (vector of matrices)
-	std::vector<Eigen::MatrixXcd> returnMat(n, Eigen::MatrixXcd:Zero(n, m));
+	std::vector<Eigen::MatrixXcd> returnMat(n, Eigen::MatrixXcd::Zero(n, m));
 
 	// The x^Tx = N constraint
-	returnVec.block(0,0,1,n,n) = 2;
 	for (int i=0; i<n; i++) {
-		returnMat.col(0) = Eigen::MatrixXcd::Constant(n, 1, 2);
+		returnMat[i].col(0) = Eigen::MatrixXcd::Constant(n, 1, 2);
 	}
 
 	// Return the vector of constraints
-	return returnVec;
+	return returnMat;
 
 }
 
@@ -319,10 +368,8 @@ double L(Eigen::VectorXcd x, Eigen::SparseMatrix<std::complex<double>> X, Eigen:
 // Differential of the Lagrangian given individual components
 Eigen::VectorXcd delL(Eigen::VectorXcd y, Eigen::SparseMatrix<std::complex<double>> Z, Eigen::VectorXcd delfCached, Eigen::MatrixXcd A_0) {
 
-	// Calculate A* Z TODO
-	Eigen::VectorXcd AStarZ = Eigen::VectorXcd::Zero(n);
-	for (int i=0; i<n; i++) {
-	}
+	// Calculate A* Z
+	Eigen::VectorXcd AStarZ = matToVec(Z);
 
 	// Return this vector
 	return delfCached - A_0.transpose()*y - AStarZ;
@@ -626,11 +673,13 @@ int main(int argc, char ** argv) {
 	numMeasureB = sets;
 	numOutcomeB = d;
 	numUniquePer = (d*(d+1))/2;
-	numMats = numPerm*numPerm*d*d + numPerm*d;
+	numRhoMats = numPerm*numOutcomeB*numOutcomeB;
+	numBMats = numMeasureB*numOutcomeB;
+	numMats = numRhoMats + numBMats;
 
 	// Sizes of matrices
 	n = numMats*numUniquePer;
-	m = n+1;
+	m = numMeasureB*numUniquePer + numMats;
 	p = numMats*d;
 	halfP = p / 2;
 
@@ -644,9 +693,16 @@ int main(int argc, char ** argv) {
 		std::cout << "          System Info           " << std::endl;;
 		std::cout << "--------------------------------" << std::endl;
 		std::cout << "               d = " << d << std::endl;
-		std::cout << "               n = " << sets << std::endl;
-		std::cout << "  size of vector = " << n << std::endl;
+		std::cout << "            sets = " << sets << std::endl;
+		std::cout << "        num rhos = " << numRhoMats << std::endl;
+		std::cout << "          num Bs = " << numBMats << std::endl;
+		std::cout << "    vals per mat = " << numUniquePer << std::endl;
+		std::cout << "  size of vector = " << n << " ~ " << n*16 / (1024*1024) << " MB " << std::endl;
 		std::cout << "  size of matrix = " << p << " x " << p << " ~ " << p*p*16 / (1024*1024) << " MB " << std::endl;
+		std::cout << "" << std::endl;
+		std::cout << "--------------------------------" << std::endl;
+		std::cout << "        Parameters Used           " << std::endl;;
+		std::cout << "--------------------------------" << std::endl;
 		std::cout << "         epsilon = " << epsilon << std::endl;
 		std::cout << "       epsilon_0 = " << epsilonZero << std::endl;
 		std::cout << "     g(x) thresh = " << gThresh << std::endl;
@@ -663,16 +719,97 @@ int main(int argc, char ** argv) {
 	}
 
 	// The "ideal" value TODO
-	double maxVal = numPerm*d*std::sqrt(d*(d-1));
+	double maxVal = numPerm*0.5*(1-1/std::sqrt(d));
 
-	// Calculate the Q matrix defining the objective TODO
+	// A vector which has [num] on the terms which will become off-diagonals
+	Eigen::VectorXcd factors2 = Eigen::VectorXcd::Constant(numUniquePer, 2);
+	Eigen::VectorXcd factors0 = Eigen::VectorXcd::Constant(numUniquePer, 0);
+	for (int j=0; j<d; j++) {
+		factors2(j*(2*d-j+1)/2) = 1;
+		factors0(j*(2*d-j+1)/2) = 1;
+	}
+
+	// Calculate the Q matrix defining the objective
+	Q = Eigen::SparseMatrix<std::complex<double>>(n, n);
+	std::vector<Eigen::Triplet<std::complex<double>>> tripsQ;
+
+	// For each pairing of B matrices
+	int vertLoc = 0;
+	for (int i=0; i<numMeasureB; i++) {
+		for (int j=i+1; j<numMeasureB; j++) {
+			for (int k=0; k<numOutcomeB; k++) {
+				for (int l=0; l<numOutcomeB; l++) {
+
+					// The indices of the matrices
+					int horizLoc1 = (numRhoMats + i*numOutcomeB + k)*numUniquePer;
+					int horizLoc2 = (numRhoMats + j*numOutcomeB + l)*numUniquePer;
+
+					// Loop over the elements per vector section
+					for (int m=0; m<numUniquePer; m++) {
+						tripsQ.push_back(Eigen::Triplet<std::complex<double>>(vertLoc+m, horizLoc1+m, factors2(m)));
+						tripsQ.push_back(Eigen::Triplet<std::complex<double>>(vertLoc+m, horizLoc2+m, factors2(m)));
+					}
+
+					// Next section
+					vertLoc += numUniquePer;
+
+				}
+			}
+		}
+	}
+
+	// Construct Q from these triplets
+	Q.setFromTriplets(tripsQ.begin(), tripsQ.end());
 	
-	// Calculate the A matrix defining the normalisation constraints TODO
+	// Calculate the A matrix defining the normalisation constraints
+	A = Eigen::SparseMatrix<std::complex<double>>(m, n);
+	std::vector<Eigen::Triplet<std::complex<double>>> tripsA;
+
+	// The first part are the sum to identity constraints
+	vertLoc = 0;
+	for (int i=0; i<numMeasureB; i++) {
+		for (int k=0; k<numOutcomeB; k++) {
+
+			// The index of the matrix
+			int horizLoc1 = (numRhoMats + i*numOutcomeB + k)*numUniquePer;
+
+			// Loop over the elements per vector section
+			for (int m=0; m<numUniquePer; m++) {
+				tripsA.push_back(Eigen::Triplet<std::complex<double>>(vertLoc+m, horizLoc1+m, 1));
+			}
+
+		}
+
+		// Next section
+		vertLoc += numUniquePer;
+
+	}
+	
+	// The second part are the trace one constraints
+	for (int i=0; i<numMats; i++) {
+
+		// The index of the matrix
+		int horizLoc1 = i*numUniquePer;
+
+		// Loop over the elements per vector section
+		for (int m=0; m<numUniquePer; m++) {
+			tripsA.push_back(Eigen::Triplet<std::complex<double>>(vertLoc, horizLoc1+m, factors0(m)));
+		}
+
+		// Next section
+		vertLoc += 1;
+
+	}
 					
-	// Calculate the b vector defining the normalisation constraints TODO
-
-	return 0;
-
+	// Construct A from these triplets
+	A.setFromTriplets(tripsA.begin(), tripsA.end());
+	
+	// Calculate the b vector defining the normalisation constraints
+	b = Eigen::VectorXcd::Ones(m);
+	for (int i=0; i<numMeasureB*numUniquePer; i++) {
+		b(i) = factors0(i % numUniquePer);
+	}
+	
 	// The primal var (and alt forms)
 	Eigen::VectorXcd x = Eigen::VectorXcd::Zero(n);
 	Eigen::SparseMatrix<std::complex<double>> X(p, p);
@@ -1009,6 +1146,16 @@ int main(int argc, char ** argv) {
 
 	} 
 	
+	prettyPrint("Q = ", Q);
+	std::cout << std::endl;
+	prettyPrint("A = ", A);
+	std::cout << std::endl;
+	prettyPrint("b = ", b);
+	std::cout << std::endl;
+	std::cout << "initial f(x) = " << f(x) << std::endl;
+	std::cout << "initial g(x) = " << g(x) << std::endl;
+	return 0;
+
 	// Gradient descent to make sure we start with an interior point
 	double v = 0;
 	for (int i=0; i<10000000; i++) {
