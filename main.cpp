@@ -51,15 +51,18 @@ int numPerm = 0;
 int numMeasureB = 0;
 int numOutcomeB = 0;
 int numUniquePer = 0;
+int numRealPer = 0;
+int numImagPer = 0;
 int numMats = 0;
 int numRhoMats = 0;
 int numBMats = 0;
-Eigen::SparseMatrix<std::complex<double>> A;
-Eigen::VectorXcd b;
-Eigen::SparseMatrix<std::complex<double>> Q;
-Eigen::SparseMatrix<std::complex<double>> identityp;
-Eigen::SparseMatrix<std::complex<double>> identityn;
-Eigen::VectorXcd factors0;
+std::vector<Eigen::SparseMatrix<double>> As;
+Eigen::SparseMatrix<double> C;
+Eigen::VectorXd b;
+Eigen::SparseMatrix<double> Q;
+Eigen::SparseMatrix<double> identityp;
+Eigen::SparseMatrix<double> identityn;
+Eigen::VectorXd factors0;
 double rt2 = std::sqrt(2);
 
 // Sizes of matrices
@@ -189,7 +192,7 @@ void prettyPrint(std::string pre, double val) {
 }
 
 // Calculate a "norm" for a 3D "matrix"
-double norm3D(std::vector<Eigen::MatrixXcd> M) {
+double norm3D(std::vector<Eigen::MatrixXd> M) {
 	double val = 0;
 	for (int i=0; i<M.size(); i++) {
 		val += M[i].norm();
@@ -197,67 +200,15 @@ double norm3D(std::vector<Eigen::MatrixXcd> M) {
 	return val;
 }
 
-// Efficiently calculate the trace of a sparse matrix
-std::complex<double> trace(Eigen::SparseMatrix<std::complex<double>> A) {
-
-	// Start with zero
-	std::complex<double> total = 0;
-
-	// Loop over all non-zero elements
-	for (int k=0; k<A.outerSize(); ++k) {
-		for (Eigen::SparseMatrix<std::complex<double>>::InnerIterator it(A,k); it; ++it) {
-
-			// If it's on the diagonal, add it
-			if (it.row() == it.col()) {
-				total += it.value();
-			}
-
-		}
-	}
-
-	// Return the sum of the diagonal
-	return total;
-
-}
-
 // Function turning X to x
-Eigen::VectorXcd matToVec(Eigen::SparseMatrix<std::complex<double>> X) {
+Eigen::VectorXd matToVec(Eigen::SparseMatrix<double> X) {
 
 	// Create a blank n vector
-	Eigen::VectorXcd newVec(n);
+	Eigen::VectorXd newVec(n);
 
-	// Loop over all non-zero elements
-	for (int k=0; k<X.outerSize(); ++k) {
-		for (Eigen::SparseMatrix<std::complex<double>>::InnerIterator it(X,k); it; ++it) {
-
-			// Only consider the upper triangle
-			if (it.col() >= it.row()) {
-
-				// Get the location in the local block matrix
-				int matInd = std::floor(it.col() / d);
-				int matx = it.col() % d;
-				int maty = it.row() % d;
-
-				// Convert the mat loc to a vec loc
-				int vecLoc = matx + (maty*(2*d-1-maty))/2;
-
-				// If it's on the diagonal 
-				if (matx == maty) {
-
-					// Set the vector value
-					newVec(matInd*numUniquePer+vecLoc) = it.value();
-
-				// If it's an off-diagonal
-				} else {
-
-					// Set the vector value
-					newVec(matInd*numUniquePer+vecLoc) = rt2*it.value();
-
-				}
-
-			}
-
-		}
+	// Extract each element
+	for (int i=0; i<n; i++) {
+		newVec(i) = X.cwiseProduct(As[i]).sum()/2;
 	}
 
 	// Return this new vector
@@ -266,85 +217,50 @@ Eigen::VectorXcd matToVec(Eigen::SparseMatrix<std::complex<double>> X) {
 }
 
 // Function turning x to X
-Eigen::SparseMatrix<std::complex<double>> vecToMat(Eigen::VectorXcd x) {
+Eigen::SparseMatrix<double> vecToMat(Eigen::VectorXd x) {
 
 	// Create a blank p by p matrix
-	Eigen::SparseMatrix<std::complex<double>> newMat(p, p);
+	Eigen::SparseMatrix<double> newMat(p, p);
 
-	// For each section of the vec representing a matrix
-	int matx = 0;
-	int maty = 0;
-	std::vector<Eigen::Triplet<std::complex<double>>> tripsNew;
-	for (int i=0; i<numMats; i++) {
-
-		// Reset the local matrix location
-		matx = 0;
-		maty = 0;
-
-		// For each element in the vec rep
-		for (int j=0; j<numUniquePer; j++) {
-
-			// If it's a diagonal term, keep it the same
-			if (matx == maty) {
-				tripsNew.push_back(Eigen::Triplet<std::complex<double>>(i*d+matx, i*d+maty, x(i*numUniquePer+j)));
-
-			// If it's from an off-diagonal, there's a factor
-			} else {
-				tripsNew.push_back(Eigen::Triplet<std::complex<double>>(i*d+matx, i*d+maty, x(i*numUniquePer+j)/rt2));
-				tripsNew.push_back(Eigen::Triplet<std::complex<double>>(i*d+maty, i*d+matx, std::conj(x(i*numUniquePer+j))/rt2));
-
-			}
-
-			// Adjust the matrix next loc
-			matx++;
-			if (matx >= d) {
-				maty++;
-				matx = maty;
-			}
-
-		}
-
+	// Extract each element
+	for (int i=0; i<n; i++) {
+		newMat += As[i]*x(i);
 	}
 
-	// Construct the matrix from these triplets
-	newMat.setFromTriplets(tripsNew.begin(), tripsNew.end());
-	
 	// Return this new matrix
 	return newMat;
 
 }
 
 // Objective function
-double f(Eigen::VectorXcd x) {
-	return -(x.adjoint()*Q*x).real()(0);
+double f(Eigen::VectorXd x) {
+	return -((x.adjoint()*Q*x)(0));
 }
 
 // Derivative of the objective function
-Eigen::VectorXcd delf(Eigen::VectorXcd x) {
-	Eigen::SparseMatrix<std::complex<double>> adj = Q.adjoint();
-	return -x.adjoint()*(Q + adj);
+Eigen::VectorXd delf(Eigen::VectorXd x) {
+	return -2*x.adjoint()*Q;
 }
 
 // Second derivative of the objective function
-Eigen::MatrixXcd del2f(Eigen::VectorXcd x) {
-	Eigen::SparseMatrix<std::complex<double>> adj = Q.adjoint();
-	return -(Q + adj);
+Eigen::MatrixXd del2f(Eigen::VectorXd x) {
+	return -2*Q;
 }
 				
 // Constraint function
-Eigen::VectorXcd g(Eigen::VectorXcd x) {
+Eigen::VectorXd g(Eigen::VectorXd x) {
 
 	// Create an empty vector
-	Eigen::VectorXcd returnVec(m);
+	Eigen::VectorXd returnVec(m);
 
 	// Need numMats to be in "vector" form (size 1 vector)
-	Eigen::VectorXcd N = Eigen::VectorXcd::Constant(1, numMats);
+	Eigen::VectorXd N = Eigen::VectorXd::Constant(1, numMats);
 
 	// First element is the x^Tx = N constraint
 	returnVec.head(1) = x.adjoint()*x - N;
 
 	// Last m-1 elements are the normalisation constraints
-	returnVec.tail(m-1) = A*x - b;
+	returnVec.tail(m-1) = C*x - b;
 
 	// Return the vector of constraints
 	return returnVec;
@@ -352,16 +268,16 @@ Eigen::VectorXcd g(Eigen::VectorXcd x) {
 }
 
 // Derivative of the constraint function
-Eigen::MatrixXcd delg(Eigen::VectorXcd x) {
+Eigen::MatrixXd delg(Eigen::VectorXd x) {
 
 	// Create an empty matrix
-	Eigen::MatrixXcd returnMat(m, n);
+	Eigen::MatrixXd returnMat(m, n);
 
 	// First element is the x^Tx = N constraint
 	returnMat.block(0,0,1,n) = 2*x.transpose();
 
 	// Last m-1 elements are the normalisation constraints
-	returnMat.block(1,0,m-1,n) = A;
+	returnMat.block(1,0,m-1,n) = C;
 
 	// Return the vector of constraints
 	return returnMat;
@@ -369,14 +285,14 @@ Eigen::MatrixXcd delg(Eigen::VectorXcd x) {
 }
 
 // Second derivatives of the constraint function
-std::vector<Eigen::MatrixXcd> del2g(Eigen::VectorXcd x) {
+std::vector<Eigen::MatrixXd> del2g(Eigen::VectorXd x) {
 
 	// Create an empty 3D matrix (vector of matrices)
-	std::vector<Eigen::MatrixXcd> returnMat(n, Eigen::MatrixXcd::Zero(n, m));
+	std::vector<Eigen::MatrixXd> returnMat(n, Eigen::MatrixXd::Zero(n, m));
 
 	// The x^Tx = N constraint
 	for (int i=0; i<n; i++) {
-		returnMat[i].col(0) = Eigen::MatrixXcd::Constant(n, 1, 2);
+		returnMat[i].col(0) = Eigen::MatrixXd::Constant(n, 1, 2);
 	}
 
 	// Return the vector of constraints
@@ -385,22 +301,22 @@ std::vector<Eigen::MatrixXcd> del2g(Eigen::VectorXcd x) {
 }
 
 // The dual
-double dual(Eigen::VectorXcd y, Eigen::SparseMatrix<std::complex<double>> Z) {
-	Eigen::VectorXcd z = matToVec(Z);
-	Eigen::VectorXcd res = -0.5 * (y.head(m-1).adjoint()*A - z.adjoint()) * (Q + y.tail(1)*identityp).adjoint() * (A*y.head(m-1) - z) - y.tail(1)*numMats - y.head(m-1).adjoint()*b;
+double dual(Eigen::VectorXd y, Eigen::SparseMatrix<double> Z) {
+	Eigen::VectorXd z = matToVec(Z);
+	Eigen::VectorXd res = -0.5 * (y.head(m-1).adjoint()*C - z.adjoint()) * (Q + y.tail(1)*identityp).adjoint() * (C*y.head(m-1) - z) - y.tail(1)*numMats - y.head(m-1).adjoint()*b;
 	return std::real(res(0));
 }
 
 // The Lagrangian 
-double L(Eigen::VectorXcd x, Eigen::SparseMatrix<std::complex<double>> X, Eigen::VectorXcd y, Eigen::SparseMatrix<std::complex<double>> Z) {
+double L(Eigen::VectorXd x, Eigen::SparseMatrix<double> X, Eigen::VectorXd y, Eigen::SparseMatrix<double> Z) {
 	return std::real(f(x) - y.dot(g(x)) - X.cwiseProduct(Z).sum());
 }
 
 // Differential of the Lagrangian given individual components
-Eigen::VectorXcd delL(Eigen::VectorXcd y, Eigen::SparseMatrix<std::complex<double>> Z, Eigen::VectorXcd delfCached, Eigen::MatrixXcd A_0) {
+Eigen::VectorXd delL(Eigen::VectorXd y, Eigen::SparseMatrix<double> Z, Eigen::VectorXd delfCached, Eigen::MatrixXd A_0) {
 
 	// Calculate A* Z
-	Eigen::VectorXcd AStarZ = matToVec(Z);
+	Eigen::VectorXd AStarZ = matToVec(Z);
 
 	// Return this vector
 	return delfCached - A_0.transpose()*y - AStarZ;
@@ -408,10 +324,10 @@ Eigen::VectorXcd delL(Eigen::VectorXcd y, Eigen::SparseMatrix<std::complex<doubl
 }
 
 // Double differential of the Lagrangian given an interior point
-Eigen::MatrixXcd del2L(Eigen::VectorXcd x, Eigen::VectorXcd y) {
+Eigen::MatrixXd del2L(Eigen::VectorXd x, Eigen::VectorXd y) {
 
-	Eigen::MatrixXcd prod(n, n);
-	std::vector<Eigen::MatrixXcd> del2gCached = del2g(x);
+	Eigen::MatrixXd prod(n, n);
+	std::vector<Eigen::MatrixXd> del2gCached = del2g(x);
 	for (int i=0; i<n; i++) {
 		prod.row(i) = del2gCached[i] * y; 
 	}
@@ -422,14 +338,14 @@ Eigen::MatrixXcd del2L(Eigen::VectorXcd x, Eigen::VectorXcd y) {
 }
 
 // Function giving the norm of a point, modified by some mu
-double rMag(double mu, Eigen::SparseMatrix<std::complex<double>> Z, Eigen::SparseMatrix<std::complex<double>> X, Eigen::VectorXcd delLCached, Eigen::VectorXcd gCached) {
+double rMag(double mu, Eigen::SparseMatrix<double> Z, Eigen::SparseMatrix<double> X, Eigen::VectorXd delLCached, Eigen::VectorXd gCached) {
 
 	// The left part of the square root
-	Eigen::VectorXcd left = Eigen::VectorXcd::Zero(n+m);
+	Eigen::VectorXd left = Eigen::VectorXd::Zero(n+m);
 	left << delLCached, gCached;
 
 	// The right part of the square root
-	Eigen::MatrixXcd right = X*Z - mu*identityp;
+	Eigen::MatrixXd right = X*Z - mu*identityp;
 
 	// Sum the l^2/Frobenius norms
 	double val = std::sqrt(left.squaredNorm() + right.squaredNorm());
@@ -440,13 +356,13 @@ double rMag(double mu, Eigen::SparseMatrix<std::complex<double>> Z, Eigen::Spars
 }
 
 // The merit function
-double F(Eigen::VectorXcd x, Eigen::SparseMatrix<std::complex<double>> Z, double mu) {
+double F(Eigen::VectorXd x, Eigen::SparseMatrix<double> Z, double mu) {
 
 	// Cache the X matrix
-	Eigen::SparseMatrix<std::complex<double>> X = vecToMat(x);
-	Eigen::VectorXcd gCached = g(x);
-	double XDeter = std::real(Eigen::MatrixXcd(X).determinant());
-	double ZDeter = std::real(Eigen::MatrixXcd(Z).determinant());
+	Eigen::SparseMatrix<double> X = vecToMat(x);
+	Eigen::VectorXd gCached = g(x);
+	double XDeter = std::real(Eigen::MatrixXd(X).determinant());
+	double ZDeter = std::real(Eigen::MatrixXd(Z).determinant());
 
 	// Calculate the two components
 	double FBP = std::real(f(x) - mu*std::log(XDeter) + rho*gCached.norm());
@@ -458,10 +374,10 @@ double F(Eigen::VectorXcd x, Eigen::SparseMatrix<std::complex<double>> Z, double
 }
 
 // The change in merit function
-double deltaF(Eigen::MatrixXcd deltaZ, Eigen::SparseMatrix<std::complex<double>> ZInverse, Eigen::SparseMatrix<std::complex<double>> Z, Eigen::SparseMatrix<std::complex<double>> X, Eigen::SparseMatrix<std::complex<double>> XInverse, Eigen::VectorXcd delfCached, Eigen::VectorXcd gCached, Eigen::MatrixXcd A_0, Eigen::VectorXcd deltax) {
+double deltaF(Eigen::MatrixXd deltaZ, Eigen::SparseMatrix<double> ZInverse, Eigen::SparseMatrix<double> Z, Eigen::SparseMatrix<double> X, Eigen::SparseMatrix<double> XInverse, Eigen::VectorXd delfCached, Eigen::VectorXd gCached, Eigen::MatrixXd A_0, Eigen::VectorXd deltax) {
 
 	// Calculate the deltaX matrix
-	Eigen::MatrixXcd deltaX = vecToMat(deltax);
+	Eigen::MatrixXd deltaX = vecToMat(deltax);
 
 	// Calculate the two components
 	double FBP = std::real(delfCached.dot(deltax) - mu*(XInverse*deltaX).trace() + rho*((gCached+A_0*deltax).norm()-gCached.norm()));
@@ -473,15 +389,15 @@ double deltaF(Eigen::MatrixXcd deltaZ, Eigen::SparseMatrix<std::complex<double>>
 }
 
 // Returns true if a matrix can be Cholesky decomposed
-bool isPD(Eigen::MatrixXcd G) {
+bool isPD(Eigen::MatrixXd G) {
 	return G.llt().info() != Eigen::NumericalIssue;
 }
-bool isPSD(Eigen::MatrixXcd G) {
-	return (G+(1e-13)*Eigen::MatrixXcd::Identity(G.cols(), G.rows())).llt().info() != Eigen::NumericalIssue;
+bool isPSD(Eigen::MatrixXd G) {
+	return (G+(1e-13)*Eigen::MatrixXd::Identity(G.cols(), G.rows())).llt().info() != Eigen::NumericalIssue;
 }
 
 // Given a matrix, make it be positive definite
-void makePD(Eigen::MatrixXcd G) {
+void makePD(Eigen::MatrixXd G) {
 
 	// See if G is already PD
 	if (!isPD(G)) {
@@ -703,7 +619,9 @@ int main(int argc, char ** argv) {
 	numPerm = sets*(sets-1)/2;
 	numMeasureB = sets;
 	numOutcomeB = d;
-	numUniquePer = (d*(d+1))/2;
+	numRealPer = (d*(d+1))/2;
+	numImagPer = (d*(d+1))/2-d;
+	numUniquePer = numRealPer + numImagPer;
 	numRhoMats = numPerm*numOutcomeB*numOutcomeB;
 	numBMats = numMeasureB*numOutcomeB;
 	numMats = numRhoMats + numBMats;
@@ -711,15 +629,15 @@ int main(int argc, char ** argv) {
 	// Sizes of matrices
 	n = numMats*numUniquePer;
 	m = 1 + numMeasureB*numUniquePer + numMats;
-	p = numMats*d;
+	p = numMats*d*2;
 	halfP = p / 2;
 
 	// Cache an identity matrix
-	identityp = Eigen::MatrixXcd::Identity(p, p).sparseView();
-	identityn = Eigen::MatrixXcd::Identity(n, n).sparseView();
+	identityp = Eigen::MatrixXd::Identity(p, p).sparseView();
+	identityn = Eigen::MatrixXd::Identity(n, n).sparseView();
 
-	// A vector which has [num] on the terms which will become off-diagonals
-	factors0 = Eigen::VectorXcd::Constant(numUniquePer, 0);
+	// A vector which has 0 on the terms which will become off-diagonals
+	factors0 = Eigen::VectorXd::Constant(numUniquePer, 0);
 	for (int j=0; j<d; j++) {
 		factors0(j*(2*d-j+1)/2) = 1;
 	}
@@ -759,8 +677,8 @@ int main(int argc, char ** argv) {
 	double maxVal = d*d*numPerm*(1+1/std::sqrt(d));
 
 	// Calculate the Q matrix defining the objective
-	Q = Eigen::SparseMatrix<std::complex<double>>(n, n);
-	std::vector<Eigen::Triplet<std::complex<double>>> tripsQ;
+	Q = Eigen::SparseMatrix<double>(n, n);
+	std::vector<Eigen::Triplet<double>> tripsQ;
 
 	// For each pairing of B matrices
 	int vertLoc = 0;
@@ -773,10 +691,20 @@ int main(int argc, char ** argv) {
 					int horizLoc1 = (numRhoMats + i*numOutcomeB + k)*numUniquePer;
 					int horizLoc2 = (numRhoMats + j*numOutcomeB + l)*numUniquePer;
 
-					// Loop over the elements per vector section
-					for (int m=0; m<numUniquePer; m++) {
-						tripsQ.push_back(Eigen::Triplet<std::complex<double>>(vertLoc+m, horizLoc1+m, 1));
-						tripsQ.push_back(Eigen::Triplet<std::complex<double>>(vertLoc+m, horizLoc2+m, 1));
+					// Loop over the real elements per vector section
+					for (int m=0; m<numRealPer; m++) {
+						tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc1+m, 1));
+						tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc2+m, 1));
+						tripsQ.push_back(Eigen::Triplet<double>(horizLoc1+m, vertLoc+m, 1));
+						tripsQ.push_back(Eigen::Triplet<double>(horizLoc2+m, vertLoc+m, 1));
+					}
+
+					// Loop over the real elements per vector section
+					for (int m=numRealPer; m<numUniquePer; m++) {
+						tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc1+m, -1));
+						tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc2+m, -1));
+						tripsQ.push_back(Eigen::Triplet<double>(horizLoc1+m, vertLoc+m, -1));
+						tripsQ.push_back(Eigen::Triplet<double>(horizLoc2+m, vertLoc+m, -1));
 					}
 
 					// Next section
@@ -790,9 +718,9 @@ int main(int argc, char ** argv) {
 	// Construct Q from these triplets
 	Q.setFromTriplets(tripsQ.begin(), tripsQ.end());
 	
-	// Calculate the A matrix defining the normalisation constraints
-	A = Eigen::SparseMatrix<std::complex<double>>(m-1, n);
-	std::vector<Eigen::Triplet<std::complex<double>>> tripsA;
+	// Calculate the C matrix defining the normalisation constraints
+	C = Eigen::SparseMatrix<double>(m-1, n);
+	std::vector<Eigen::Triplet<double>> tripsC;
 
 	// The first part are the sum to identity constraints
 	vertLoc = 0;
@@ -804,7 +732,7 @@ int main(int argc, char ** argv) {
 
 			// Loop over the elements per vector section
 			for (int l=0; l<numUniquePer; l++) {
-				tripsA.push_back(Eigen::Triplet<std::complex<double>>(vertLoc+l, horizLoc1+l, 1));
+				tripsC.push_back(Eigen::Triplet<double>(vertLoc+l, horizLoc1+l, 1));
 			}
 
 		}
@@ -822,7 +750,7 @@ int main(int argc, char ** argv) {
 
 		// Loop over the elements per vector section
 		for (int l=0; l<numUniquePer; l++) {
-			tripsA.push_back(Eigen::Triplet<std::complex<double>>(vertLoc, horizLoc1+l, factors0(l)));
+			tripsC.push_back(Eigen::Triplet<double>(vertLoc, horizLoc1+l, factors0(l)));
 		}
 
 		// Next section
@@ -830,24 +758,95 @@ int main(int argc, char ** argv) {
 
 	}
 					
-	// Construct A from these triplets
-	A.setFromTriplets(tripsA.begin(), tripsA.end());
+	// Construct C from these triplets
+	C.setFromTriplets(tripsC.begin(), tripsC.end());
 	
 	// Calculate the b vector defining the normalisation constraints
-	b = Eigen::VectorXcd::Ones(m-1);
+	b = Eigen::VectorXd::Ones(m-1);
 	for (int i=0; i<numMeasureB*numUniquePer; i++) {
 		b(i) = factors0(i % numUniquePer);
 	}
-	
+
+	// Calculate the A matrices for turning x -> X
+	As = std::vector<Eigen::SparseMatrix<double>>(n);
+	double oneOverRt2 = 1.0 / std::sqrt(2);
+	int matx = 0;
+	int maty = 0;
+	for (int i=0; i<n; i++) {
+
+		// For each A
+		Eigen::SparseMatrix<double> A(p, p);
+		std::vector<Eigen::Triplet<double>> tripsA;
+
+		// The location of the matrix for this element
+		int matInd = std::floor(i / numUniquePer);
+		int matLoc = matInd*d*2;
+
+		// Reset the pos at the start of each new matrix
+		int reli = i % numUniquePer;
+		if (reli == 0) {
+			matx = 0;
+			maty = 0;
+		} else if (reli == numRealPer) {
+			matx = 1;
+			maty = 0;
+		}
+
+		// If it's a non-diagonal
+		if (matx != maty) {
+
+			// If it's a real component
+			if (reli < numRealPer) {
+				tripsA.push_back(Eigen::Triplet<double>(matLoc+matx, matLoc+maty, oneOverRt2));
+				tripsA.push_back(Eigen::Triplet<double>(matLoc+maty, matLoc+matx, oneOverRt2));
+				tripsA.push_back(Eigen::Triplet<double>(matLoc+matx+d, matLoc+maty+d, oneOverRt2));
+				tripsA.push_back(Eigen::Triplet<double>(matLoc+maty+d, matLoc+matx+d, oneOverRt2));
+
+			// If it's imaginary
+			} else {
+				tripsA.push_back(Eigen::Triplet<double>(matLoc+matx+d, matLoc+maty, oneOverRt2));
+				tripsA.push_back(Eigen::Triplet<double>(matLoc+maty+d, matLoc+matx, -oneOverRt2));
+				tripsA.push_back(Eigen::Triplet<double>(matLoc+matx, matLoc+maty+d, -oneOverRt2));
+				tripsA.push_back(Eigen::Triplet<double>(matLoc+maty, matLoc+matx+d, oneOverRt2));
+
+			}
+
+		// If it's a non-diagonal
+		} else {
+			tripsA.push_back(Eigen::Triplet<double>(matLoc+matx, matLoc+maty, 1));
+			tripsA.push_back(Eigen::Triplet<double>(matLoc+matx+d, matLoc+maty+d, 1));
+
+		}
+
+		// Update the position location
+		matx++;
+		if (matx >= d) {
+			if (reli < numRealPer) {
+				maty++;
+				matx = maty;
+			} else {
+				maty++;
+				matx = maty+1;
+			}
+		}
+
+		// Construct this sparse matrix
+		A.setFromTriplets(tripsA.begin(), tripsA.end());
+
+		// Add to the list
+		As[i] = A;
+
+	}
+
 	// The primal var (and alt forms)
-	Eigen::VectorXcd x = Eigen::VectorXcd::Zero(n);
-	Eigen::SparseMatrix<std::complex<double>> X(p, p);
-	Eigen::MatrixXcd XDense = Eigen::MatrixXcd::Zero(p, p);
+	Eigen::VectorXd x = Eigen::VectorXd::Zero(n);
+	Eigen::SparseMatrix<double> X(p, p);
+	Eigen::MatrixXd XDense = Eigen::MatrixXd::Zero(p, p);
 
 	// The dual vars (and alt forms)
-	Eigen::VectorXcd y = Eigen::VectorXcd::Zero(m);
-	Eigen::SparseMatrix<std::complex<double>> Z(p, p);
-	Eigen::MatrixXcd ZDense = Eigen::MatrixXcd::Zero(p, p);
+	Eigen::VectorXd y = Eigen::VectorXd::Zero(m);
+	Eigen::SparseMatrix<double> Z(p, p);
+	Eigen::MatrixXd ZDense = Eigen::MatrixXd::Zero(p, p);
 
 	// Seed so it's random each time
 	if (initMode == "random") {
@@ -1170,26 +1169,29 @@ int main(int argc, char ** argv) {
 
 		// Put these in the B diagonals
 		for (int i=0; i<numBMats; i++) {
-			int matLoc = numRhoMats*d+i*d;
+			int matLoc = (numRhoMats+i)*2*d;
 			for (int j=0; j<d; j++) {
 				for (int k=0; k<d; k++) {
-					XDense(matLoc+j, matLoc+k) = Ms[i][j][k];
+					XDense(matLoc+j, matLoc+k) = std::real(Ms[i][j][k]);
+					XDense(matLoc+d+j, matLoc+d+k) = std::real(Ms[i][j][k]);
+					XDense(matLoc+j, matLoc+d+k) = std::imag(Ms[i][j][k]);
+					XDense(matLoc+d+j, matLoc+k) = -std::imag(Ms[i][j][k]);
 				}
 			}
 		}
 
-		// Calculate the ideal rho
+		// Calculate the ideal rho TODO
 		double rtd = std::sqrt(d);
 		int rhoLoc = 0;
 		for (int i=0; i<numMeasureB; i++) {
 			for (int j=i+1; j<numMeasureB; j++) {
 				for (int k=0; k<numOutcomeB; k++) {
 					for (int l=0; l<numOutcomeB; l++) {
-						int loc1 = (numRhoMats + i*numOutcomeB + k)*d;
-						int loc2 = (numRhoMats + j*numOutcomeB + l)*d;
-						Eigen::MatrixXcd B1 = XDense.block(loc1, loc1, d, d);
-						Eigen::MatrixXcd B2 = XDense.block(loc2, loc2, d, d);
-						Eigen::MatrixXcd newRho = B1 + B2 + rtd*(B1*B2 + B2*B1);
+						int loc1 = (numRhoMats + i*numOutcomeB + k)*d*2;
+						int loc2 = (numRhoMats + j*numOutcomeB + l)*d*2;
+						Eigen::MatrixXd B1 = XDense.block(loc1, loc1, d, d);
+						Eigen::MatrixXd B2 = XDense.block(loc2, loc2, d, d);
+						Eigen::MatrixXd newRho = B1 + B2 + rtd*(B1*B2 + B2*B1);
 						XDense.block(rhoLoc, rhoLoc, d, d) = newRho / newRho.trace();
 						rhoLoc += d;
 					}
@@ -1202,16 +1204,18 @@ int main(int argc, char ** argv) {
 
 	} 
 
-	x(0) *= 1.1;
-	x(7) *= 1.1;
-	x(9) *= 1.1;
+	//x(0) *= 1.1;
+	//x(7) *= 1.1;
+	//x(9) *= 1.1;
 	
 	// TODO
 	std::cout << "initial f(x) = " << f(x) << " <= " << maxVal << std::endl;
 	std::cout << "initial g(x) = " << g(x) << std::endl;
 
+	return 0;
+
 	// Gradient descent to make sure we start with an interior point
-	Eigen::VectorXcd v = Eigen::VectorXcd::Zero(n);
+	Eigen::VectorXd v = Eigen::VectorXd::Zero(n);
 	for (int i=0; i<10000; i++) {
 		v = g(x);
 		if (outputMode == "") {
@@ -1228,7 +1232,7 @@ int main(int argc, char ** argv) {
 
 	// Get the full matrices from this
 	X = vecToMat(x);
-	XDense = Eigen::MatrixXcd(X);
+	XDense = Eigen::MatrixXd(X);
 
 	std::cout << "after f(x) = " << f(x) << " <= " << maxVal << std::endl;
 	std::cout << "after g(x) = " << g(x) << std::endl;
@@ -1245,10 +1249,10 @@ int main(int argc, char ** argv) {
 		std::cout << "--------------------------------" << std::endl;
 		std::cout << "        Initial Matrices        " << std::endl;;
 		std::cout << "--------------------------------" << std::endl;
-		Eigen::MatrixXcd M(d, d);
+		Eigen::MatrixXd M(d, d);
 		for (int i=0; i<numMats; i++) {
 			int ind = i*d;
-			M = Eigen::MatrixXcd(XDense.block(ind, ind, d, d));
+			M = Eigen::MatrixXd(XDense.block(ind, ind, d, d));
 			std::cout << std::endl;
 			prettyPrint("mat " + std::to_string(i) + " = ", M);
 			std::cout << std::endl;
@@ -1270,7 +1274,7 @@ int main(int argc, char ** argv) {
 	//}
 
 	// Initialise Z
-	ZDense = Eigen::MatrixXcd::Zero(p, p);
+	ZDense = Eigen::MatrixXd::Zero(p, p);
 	//for (int i=0; i<numMeasureB; i++) {
 		//for (int j=0; j<numOutcomeB; j++) {
 			//int currentLoc = (i*numOutcomeB + j) * d;
@@ -1301,28 +1305,28 @@ int main(int argc, char ** argv) {
 	//}
 
 	// Init some thing that are used for the first calcs
-	Eigen::SparseMatrix<std::complex<double>> XInverse = XDense.inverse().sparseView();
-	Eigen::SparseMatrix<std::complex<double>> ZInverse = ZDense.inverse().sparseView();
-	Eigen::VectorXcd gCached = g(x);
-	Eigen::MatrixXcd A_0 = delg(x);
-	Eigen::VectorXcd delfCached = delf(x);
-	Eigen::VectorXcd delLCached = delL(y, Z, delfCached, A_0);
+	Eigen::SparseMatrix<double> XInverse = XDense.inverse().sparseView();
+	Eigen::SparseMatrix<double> ZInverse = ZDense.inverse().sparseView();
+	Eigen::VectorXd gCached = g(x);
+	Eigen::MatrixXd A_0 = delg(x);
+	Eigen::VectorXd delfCached = delf(x);
+	Eigen::VectorXd delLCached = delL(y, Z, delfCached, A_0);
 	double rMagZero = rMag(0, Z, X, delLCached, gCached);
 
 	// Used for the BFGS update
-	Eigen::VectorXcd prevx = x;
-	Eigen::MatrixXcd prevA_0 = A_0;
-	Eigen::VectorXcd prevDelfCached = delfCached;
+	Eigen::VectorXd prevx = x;
+	Eigen::MatrixXd prevA_0 = A_0;
+	Eigen::VectorXd prevDelfCached = delfCached;
 
 	// To prevent reinit each time
-	Eigen::MatrixXcd G = Eigen::MatrixXcd::Zero(n, n);
-	Eigen::MatrixXcd H = Eigen::MatrixXcd::Zero(n, n);
-	Eigen::VectorXcd AStarXInverse = Eigen::VectorXcd::Zero(n);
-	Eigen::MatrixXcd GHInverse = Eigen::MatrixXcd::Zero(n, n);
-	Eigen::MatrixXcd deltaX = Eigen::MatrixXcd::Zero(n, n);
-	Eigen::VectorXcd deltax = Eigen::VectorXcd::Zero(n);
-	Eigen::VectorXcd deltay = Eigen::VectorXcd::Zero(m);
-	Eigen::MatrixXcd deltaZ = Eigen::MatrixXcd::Zero(p, p);
+	Eigen::MatrixXd G = Eigen::MatrixXd::Zero(n, n);
+	Eigen::MatrixXd H = Eigen::MatrixXd::Zero(n, n);
+	Eigen::VectorXd AStarXInverse = Eigen::VectorXd::Zero(n);
+	Eigen::MatrixXd GHInverse = Eigen::MatrixXd::Zero(n, n);
+	Eigen::MatrixXd deltaX = Eigen::MatrixXd::Zero(n, n);
+	Eigen::VectorXd deltax = Eigen::VectorXd::Zero(n);
+	Eigen::VectorXd deltay = Eigen::VectorXd::Zero(m);
+	Eigen::MatrixXd deltaZ = Eigen::MatrixXd::Zero(p, p);
 
 	// If using the BFGS update
 	if (useBFGS) {
@@ -1377,8 +1381,8 @@ int main(int argc, char ** argv) {
 
 			// Update the caches
 			X = vecToMat(x);
-			XDense = Eigen::MatrixXcd(X);
-			ZDense = Eigen::MatrixXcd(Z);
+			XDense = Eigen::MatrixXd(X);
+			ZDense = Eigen::MatrixXd(Z);
 			XInverse = XDense.inverse().sparseView();
 			ZInverse = ZDense.inverse().sparseView();
 			gCached = g(x);
@@ -1408,9 +1412,9 @@ int main(int argc, char ** argv) {
 			AStarXInverse = matToVec(XInverse);
 
 			// Calculate the x and y by solving system of linear equations
-			Eigen::MatrixXcd leftMat = Eigen::MatrixXcd::Zero(n+m, n+m);
-			Eigen::VectorXcd rightVec = Eigen::VectorXcd::Zero(n+m);
-			Eigen::VectorXcd solution = Eigen::VectorXcd::Zero(n+m);
+			Eigen::MatrixXd leftMat = Eigen::MatrixXd::Zero(n+m, n+m);
+			Eigen::VectorXd rightVec = Eigen::VectorXd::Zero(n+m);
+			Eigen::VectorXd solution = Eigen::VectorXd::Zero(n+m);
 			leftMat.block(0,0,n,n) = G + H;
 			leftMat.block(n,0,m,n) = -A_0;
 			leftMat.block(0,n,n,m) = -A_0.transpose();
@@ -1484,13 +1488,13 @@ int main(int argc, char ** argv) {
 				delfCached = delf(x);
 
 				// Update G
-				Eigen::VectorXcd s = x - prevx;
-				Eigen::VectorXcd q = delL(y, Z, delfCached, A_0) - delL(y, Z, prevDelfCached, prevA_0);
+				Eigen::VectorXd s = x - prevx;
+				Eigen::VectorXd q = delL(y, Z, delfCached, A_0) - delL(y, Z, prevDelfCached, prevA_0);
 				double psi = 1;
 				if ((s.adjoint()*q).real()(0) < (0.2*s.adjoint()*G*s).real()(0)) {
 					psi = ((0.8*s.adjoint()*G*s) / (s.adjoint()*(G*s - q))).real()(0);
 				}
-				Eigen::VectorXcd qBar = psi*q + (1-psi)*(G*s);
+				Eigen::VectorXd qBar = psi*q + (1-psi)*(G*s);
 				G = G - ((G*(s*(s.transpose()*G))) / (s.adjoint()*G*s)) + ((qBar*qBar.transpose()) / (s.adjoint()*qBar));
 
 			}
@@ -1511,40 +1515,40 @@ int main(int argc, char ** argv) {
 	auto t2 = std::chrono::high_resolution_clock::now();
 
 	// Output the initial Z
-	if (outputMode == "") {
-		std::cout << "" << std::endl;
-		std::cout << "--------------------------------" << std::endl;
-		std::cout << "      Final Z " << std::endl;;
-		std::cout << "--------------------------------" << std::endl;
-		for (int i=0; i<numMeasureB; i++) {
-			for (int j=0; j<numOutcomeB; j++) {
-				int ind = (i*numOutcomeB + j)*d;
-				Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
-				std::cout << std::endl;
-				prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
-			}
-		}
-	}
+	//if (outputMode == "") {
+		//std::cout << "" << std::endl;
+		//std::cout << "--------------------------------" << std::endl;
+		//std::cout << "      Final Z " << std::endl;;
+		//std::cout << "--------------------------------" << std::endl;
+		//for (int i=0; i<numMeasureB; i++) {
+			//for (int j=0; j<numOutcomeB; j++) {
+				//int ind = (i*numOutcomeB + j)*d;
+				//Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
+				//std::cout << std::endl;
+				//prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
+			//}
+		//}
+	//}
 
 	// Extract the solution from X
-	if (outputMode == "") {
-		std::cout << "" << std::endl;
-		std::cout << "----------------------------------" << std::endl;
-		std::cout << "         Final Matrices " << std::endl;;
-		std::cout << "----------------------------------" << std::endl;
-		Eigen::MatrixXcd M(d, d);
-		for (int i=0; i<numMeasureB; i++) {
-			for (int j=0; j<numOutcomeB; j++) {
-				int ind = (i*numOutcomeB + j)*d;
-				M = Eigen::MatrixXcd(X.block(ind, ind, d, d));
-				std::cout << std::endl;
-				prettyPrint("M_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
-				std::cout << std::endl;
-				std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
-				std::cout << "is M PD? = " << isPD(M) << std::endl;
-			}
-		}
-	}
+	//if (outputMode == "") {
+		//std::cout << "" << std::endl;
+		//std::cout << "----------------------------------" << std::endl;
+		//std::cout << "         Final Matrices " << std::endl;;
+		//std::cout << "----------------------------------" << std::endl;
+		//Eigen::MatrixXcd M(d, d);
+		//for (int i=0; i<numMeasureB; i++) {
+			//for (int j=0; j<numOutcomeB; j++) {
+				//int ind = (i*numOutcomeB + j)*d;
+				//M = Eigen::MatrixXcd(X.block(ind, ind, d, d));
+				//std::cout << std::endl;
+				//prettyPrint("B_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
+				//std::cout << std::endl;
+				//std::cout << "|B^2-B|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
+				//std::cout << "is B PD? = " << isPD(M) << std::endl;
+			//}
+		//}
+	//}
 
 	// Final output
 	if (outputMode == "") {
