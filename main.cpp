@@ -308,7 +308,7 @@ std::vector<Eigen::MatrixXd> del2g(Eigen::VectorXd x) {
 
 }
 
-// The dual TODO reformat for non complex
+// The dual TODO check
 double dual(Eigen::VectorXd y, Eigen::SparseMatrix<double> Z) {
 	Eigen::VectorXd z = matToVec(Z, 0);
 	Eigen::VectorXd temp = C.transpose()*y.tail(m-1) - z;
@@ -338,7 +338,7 @@ Eigen::VectorXd delL(Eigen::VectorXd y, Eigen::SparseMatrix<double> Z, Eigen::Ve
 // Double differential of the Lagrangian given an interior point
 Eigen::MatrixXd del2L(Eigen::VectorXd x, Eigen::VectorXd y) {
 
-	// Calculate del2g * y TODO check this
+	// Calculate del2g * y
 	Eigen::MatrixXd prod(n, n);
 	std::vector<Eigen::MatrixXd> del2gCached = del2g(x);
 	for (int i=0; i<n; i++) {
@@ -1512,8 +1512,7 @@ int main(int argc, char ** argv) {
 			// Update variables
 			x += alpha*deltax;
 			y += deltay;
-			ZDense += alpha*deltaZ;
-			Z = ZDense.sparseView();
+			Z += (alpha*deltaZ).sparseView();
 			
 			// If using a BFGS update
 			//if (useBFGS) {
@@ -1549,45 +1548,45 @@ int main(int argc, char ** argv) {
 	// Stop the timer
 	auto t2 = std::chrono::high_resolution_clock::now();
 
-	// Output the initial Z
-	//if (outputMode == "") {
-		//std::cout << "" << std::endl;
-		//std::cout << "--------------------------------" << std::endl;
-		//std::cout << "      Final Z " << std::endl;;
-		//std::cout << "--------------------------------" << std::endl;
-		//for (int i=0; i<numMeasureB; i++) {
-			//for (int j=0; j<numOutcomeB; j++) {
-				//int ind = (i*numOutcomeB + j)*d;
-				//Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
-				//std::cout << std::endl;
-				//prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
-			//}
-		//}
-	//}
+	// Output the final y TODO
+	std::cout << "" << std::endl;
+	std::cout << "--------------------------------" << std::endl;
+	std::cout << "      Final y " << std::endl;;
+	std::cout << "--------------------------------" << std::endl;
+	prettyPrint("y = ", y);
+	
+	// Output the final Z
+	if (outputMode == "") {
+		std::cout << "" << std::endl;
+		std::cout << "--------------------------------" << std::endl;
+		std::cout << "      Final Z " << std::endl;;
+		std::cout << "--------------------------------" << std::endl;
+		for (int i=0; i<numMats; i++) {
+			int ind = i*d;
+			Eigen::MatrixXcd M = Eigen::MatrixXcd(Z.block(ind, ind, d, d)) + Eigen::MatrixXcd(1i*Z.block(ind+d, ind, d, d));
+			std::cout << std::endl;
+			prettyPrint("Z_" + std::to_string(i) + " = ", M);
+		}
+	}
 
 	// Extract the solution from X
-	//if (outputMode == "") {
-		//std::cout << "" << std::endl;
-		//std::cout << "----------------------------------" << std::endl;
-		//std::cout << "         Final Matrices " << std::endl;;
-		//std::cout << "----------------------------------" << std::endl;
-		//Eigen::MatrixXcd M(d, d);
-		//for (int i=0; i<numMeasureB; i++) {
-			//for (int j=0; j<numOutcomeB; j++) {
-				//int ind = (i*numOutcomeB + j)*d;
-				//M = Eigen::MatrixXcd(X.block(ind, ind, d, d));
-				//std::cout << std::endl;
-				//prettyPrint("B_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
-				//std::cout << std::endl;
-				//std::cout << "|B^2-B|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
-				//std::cout << "is B PD? = " << isPD(M) << std::endl;
-			//}
-		//}
-	//}
+	if (outputMode == "") {
+		std::cout << "" << std::endl;
+		std::cout << "----------------------------------" << std::endl;
+		std::cout << "         Final Matrices " << std::endl;;
+		std::cout << "----------------------------------" << std::endl;
+		Eigen::MatrixXcd B(d, d);
+		for (int i=0; i<numMats; i++) {
+			int ind = i*2*d;
+			B = Eigen::MatrixXcd(X.block(ind, ind, d, d)) + 1i*Eigen::MatrixXcd(X.block(ind+d, ind, d, d));
+			std::cout << std::endl;
+			prettyPrint("B_" + std::to_string(i) + " = ", B);
+		}
+	}
 
 	// Final output
 	if (outputMode == "") {
-		std::cout << "" << std::endl;
+		std::cout << std::scientific << "" << std::endl;
 		std::cout << "----------------------------------" << std::endl;
 		std::cout << "         Final Output " << std::endl;;
 		std::cout << "----------------------------------" << std::endl;
