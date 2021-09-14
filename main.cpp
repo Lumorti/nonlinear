@@ -265,10 +265,10 @@ Eigen::VectorXd g(Eigen::VectorXd x) {
 	Eigen::VectorXd N = Eigen::VectorXd::Constant(1, numMats);
 
 	// First element is the x^Tx = N constraint
-	returnVec.head(1) = gScaling*(x.transpose()*x - N);
+	returnVec.head(1) = gScaling*(N - x.transpose()*x);
 
 	// Last m-1 elements are the normalisation constraints
-	returnVec.tail(m-1) = 10*gScaling*(C*x - b);
+	returnVec.tail(m-1) = 10*gScaling*(b - C*x);
 
 	// Return the vector of constraints
 	return returnVec;
@@ -282,10 +282,10 @@ Eigen::MatrixXd delg(Eigen::VectorXd x) {
 	Eigen::MatrixXd returnMat(m, n);
 
 	// First element is the x^Tx = N constraint
-	returnMat.block(0,0,1,n) = gScaling*2*x.transpose();
+	returnMat.block(0,0,1,n) = -gScaling*2*x.transpose();
 
 	// Last m-1 elements are the normalisation constraints
-	returnMat.block(1,0,m-1,n) = 10*gScaling*C;
+	returnMat.block(1,0,m-1,n) = -10*gScaling*C;
 
 	// Return the vector of constraints
 	return returnMat;
@@ -312,7 +312,7 @@ std::vector<Eigen::MatrixXd> del2g(Eigen::VectorXd x) {
 double dual(Eigen::VectorXd y, Eigen::SparseMatrix<double> Z) {
 	Eigen::VectorXd z = matToVec(Z, 0);
 	Eigen::VectorXd temp = C.transpose()*y.tail(m-1) - z;
-	Eigen::VectorXd res = -0.5 * temp.transpose()*((Q + y.head(1)(0)*identityp)*temp) - y.head(1)*numMats - y.tail(m-1).transpose()*b;
+	Eigen::VectorXd res = -0.5 * temp.transpose()*(Eigen::MatrixXd(Q + y.head(1)(0)*identityp).inverse()*temp) - y.head(1)*numMats - y.tail(m-1).transpose()*b;
 	return res(0);
 }
 
@@ -1362,9 +1362,9 @@ int main(int argc, char ** argv) {
 	int totalInner = 0;
 	for (k=0; k<maxOuterIter; k++) {
 
-		// Check if global convergence is reached
+		// Check if global convergence is reached TODO
 		rMagZero = rMag(0, Z, X, delLCached, gCached);
-		if (rMagZero <= epsilon) {
+		if (std::abs(f(x) - dual(y, Z)) < epsilon) {
 			break;
 		}
 
@@ -1463,7 +1463,7 @@ int main(int argc, char ** argv) {
 			}
 			double alphaBar = std::min(std::min(alphaBarX, alphaBarZ), 1.0);
 
-			// Calculate optimal step size using a line search
+			// Calculate optimal step size using a line search TODO y >= 0?
 			double alpha;
 			int l;
 			double FCached = F(x, Z, mu);
@@ -1575,6 +1575,7 @@ int main(int argc, char ** argv) {
 		std::cout << "----------------------------------" << std::endl;
 		std::cout << "         Final Matrices " << std::endl;;
 		std::cout << "----------------------------------" << std::endl;
+		X = vecToMat(x, 0);
 		Eigen::MatrixXcd B(d, d);
 		for (int i=0; i<numMats; i++) {
 			int ind = i*2*d;

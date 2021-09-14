@@ -1,0 +1,81 @@
+\documentclass{article}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\setlength{\parskip}{1em}
+\setlength{\parindent}{0em}
+\setcounter{MaxMatrixCols}{20}
+
+\begin{document}
+
+Our original primal problem is as follows:
+
+\begin{align}
+	\text{min}_{x} ~ x^T Q &x \\
+	\text{s.t.} ~~ x^T x - N &= 0 \\
+	Cx - b &= 0 \\
+	X = \sum_i A_i x &\succeq 0 \\
+\end{align}
+
+The $x$ here is a vector which contains the elements of some matrices $\rho$ and $B$, the $C$ and $b$ give the linear constraints that the $\rho$ and $B$ matrices need to sum to the identity and have trace one, the $A$ matrices convert the $x$ vector to the $X$ matrix (which has the $\rho$ and $B$ matrices on the diagonal), whilst the $Q$ matrix creates the objective function such that minimising it also minimises:
+
+\begin{align}
+	\sum_{i<j}^n \sum_{kl}^d -\rho_{k,l}^{ij} (B_k^i + B_l^j)
+\end{align}
+
+This equation only has a minimum when the B matrices are all Mutually Unbiased Bases (MUBs). Specifically, this will be able to reach a value of:
+
+\begin{align}
+	-d^2 \binom{n}{2} \left(1+\frac{1}{\sqrt{d}}\right)
+\end{align}
+
+if it is possible to have MUBs in that dimension $d$ and number of bases $n$.  Thus when solving this primal problem any valid interior point will be an upper bound for this objective function. The corresponding dual will provide an improving lower bound for this same function, which if this can be shown to be higher than the above critical value then it means that there do not exist MUBs in that case, which is the desired outcome.
+
+The Lagrangian for this primal can be written as follows, with Lagrange multipliers for the various constraints:
+
+\begin{align}
+	L(x, y, \lambda, z) &= x^T Q x - y^T (b-Cx) - \lambda (x^T x - N) - z^T x \\ 
+						&= x^T ( Q + \lambda I) x + (y^TC - z^T) x - \lambda N - y^T b
+\end{align}
+
+The most general form of the dual is therefore:
+\begin{align}
+	U(y, \lambda, z) = \text{inf}_{x} ~  x^T ( Q + \lambda I) x + (y^TC - z^T) x - \lambda N - y^T b
+\end{align}
+
+We now consider the three possible cases for the dual, where $R(M)$ represents the row-space of a matrix $M$:
+
+\begin{itemize}
+\item $Q+\lambda I \not\succeq 0$:
+	\begin{align}
+		\implies &\exists x : ~ x^T (Q + \lambda I) x < 0 \\
+				 &\text{and} ~~ (y^TC-z^T)x \le 0 \\
+		&\therefore ~ x \to n x \implies U(y, \lambda, z) \to -\infty
+	\end{align}
+\item $Q+\lambda I \succeq 0$ and $y^TC-z^T \not \in R(Q+\lambda I)$:
+	\begin{align}
+		\implies &\exists x : ~ x^T (Q + \lambda I) x = 0 \\
+				 &\text{and} ~~ (y^TC-z^T)x < 0 \\
+		&\therefore ~ x \to n x \implies U(y, \lambda, z) \to -\infty
+	\end{align}
+\item $Q+\lambda I \succeq 0$ and $y^TC-z^T \in R(Q+\lambda I)$:
+	\begin{align}
+		\implies &\exists x : ~ x^T (Q + \lambda I) x = 0 \\
+				 &\text{and} ~~ (y^TC-z^T)x = 0 \\
+				 &\therefore \text{even} ~ x \to n x \implies U(y, \lambda, z) > -\infty
+	\end{align}
+\end{itemize}
+
+Thus for this dual to be bounded the third set of conditions must be true, which is a known form for this problem, giving the simplified dual, where $M^\dagger$ represents the pseudo-inverse for some $M$:
+
+\begin{align}
+	\text{max}_{y, \lambda, z} -&\frac{1}{2} (y^T C - z^T) (Q+\lambda I)^\dagger (C^Ty - z) - \lambda N - y^T b \\ 
+	\text{s.t.} ~~ &Z  = \sum_i A_i z_i \succeq 0 \\
+				&Q+ \lambda I \succeq 0 \\
+				&y^TC-z^T \in R(Q+\lambda I)
+\end{align}
+
+This can either be solved as a non-linear (but convex) optimisation problem, or as a series of two SDP seesaws (alternating between fixing $\lambda$ and fixing $y$ and $z$).
+
+\end{document}
