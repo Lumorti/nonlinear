@@ -18,7 +18,7 @@ Our original primal problem is as follows:
 	X = \sum_i A_i x &\succeq 0 \\
 \end{align}
 
-The $x$ here is a vector which contains the elements of some matrices $\rho$ and $B$, the $C$ and $b$ give the linear constraints that the $\rho$ and $B$ matrices need to sum to the identity and have trace one, the $A$ matrices convert the $x$ vector to the $X$ matrix (which has the $\rho$ and $B$ matrices on the diagonal), whilst the $Q$ matrix creates the objective function such that minimising it also minimises:
+The $x$ here is a vector which contains the elements of some matrices $\rho$ and $B$, the $C$ and $b$ give the linear constraints that the $\rho$ and $B$ matrices need to sum to the identity and have trace one, the $A$ matrices convert the $x$ vector to the $X$ matrix which has the $\rho$ and $B$ matrices on the diagonal, thus ensuring that they are all positive semidefinite, whilst the $Q$ matrix creates the objective function such that:
 
 \begin{align}
 	\sum_{i<j}^n \sum_{kl}^d -\rho_{k,l}^{ij} (B_k^i + B_l^j)
@@ -63,19 +63,40 @@ We now consider the three possible cases for the dual, where $R(M)$ represents t
 	\begin{align}
 		\implies &\exists x : ~ x^T (Q + \lambda I) x = 0 \\
 				 &\text{and} ~~ (y^TC-z^T)x = 0 \\
-				 &\therefore \text{even} ~ x \to n x \implies U(y, \lambda, z) > -\infty
+				 &\therefore ~ x \to n x \implies U(y, \lambda, z) > -\infty
 	\end{align}
 \end{itemize}
 
 Thus for this dual to be bounded the third set of conditions must be true, which is a known form for this problem, giving the simplified dual, where $M^\dagger$ represents the pseudo-inverse for some $M$:
 
 \begin{align}
-	\text{max}_{y, \lambda, z} -&\frac{1}{2} (y^T C - z^T) (Q+\lambda I)^\dagger (C^Ty - z) - \lambda N - y^T b \\ 
+	\text{max}_{y, \lambda, z} ~ -&\frac{1}{2} (y^T C - z^T) (Q+\lambda I)^\dagger (C^Ty - z) - \lambda N - y^T b \\ 
 	\text{s.t.} ~~ &Z  = \sum_i A_i z_i \succeq 0 \\
 				&Q+ \lambda I \succeq 0 \\
 				&y^TC-z^T \in R(Q+\lambda I)
 \end{align}
 
-This can either be solved as a non-linear (but convex) optimisation problem, or as a series of two SDP seesaws (alternating between fixing $\lambda$ and fixing $y$ and $z$).
+\pagebreak 
+
+This can either be solved as a non-linear (but convex) optimisation problem, or as a series of two SDPs, thus allowing an efficient seesaw. If we fix $y$ and $z$, the problem becomes an SDP as follows:
+
+\begin{align}
+	\text{max}_{\lambda} ~ -&\frac{1}{2} w^T (Q+\lambda I)^\dagger w - \lambda N - y^T b \\ 
+	\text{s.t.} ~~ &\begin{pmatrix} Q+\lambda I & w \\ w^T & w^T(Q+\lambda I)w \end{pmatrix} \succeq 0 \\
+				   &\text{where} ~~ w = C^T y - z
+\end{align}
+
+If we then fix the $\lambda$ we get a quadratic program with an SDP constraint:
+
+\begin{align}
+	\text{max}_{y, z} ~ -&\frac{1}{2} (y^T C - z^T) W^\dagger (C^Ty - z) - \lambda N - y^T b \\ 
+	\text{s.t.} ~~ &Z  = \sum_i A_i z_i \succeq 0 \\
+				   &P(y^TC-z^T)-y^T C+z^T = 0 \\ 
+				   \\
+				\text{where} ~~ &W = Q+\lambda I \\
+				&P = W (W^T W)^{-1} W^T
+\end{align}
+
+
 
 \end{document}
