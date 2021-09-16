@@ -6,6 +6,10 @@
 #include <iomanip>
 #include <math.h>
 
+// To adapt this script to any general nonconvex optimisation problem
+// search for CHANGE, these are the only functions that need to
+// be adjusted for a new problem
+
 // Allow use of "2i" for complex
 using namespace std::complex_literals;
 
@@ -35,6 +39,7 @@ bool useBFGS = false;
 double BFGSmaxG = 1e-10;
 double fScaling = 1.00;
 double gScaling = 0.05;
+double derivDelta = 1e-15;
 
 // Parameters between 0 and 1
 double gammaVal = 0.9;
@@ -58,16 +63,25 @@ int numImagPer = 0;
 int numMats = 0;
 int numRhoMats = 0;
 int numBMats = 0;
+int numLambda = 0;
+int numy = 0;
+int numz = 0;
 std::vector<Eigen::SparseMatrix<double>> As;
+std::vector<Eigen::SparseMatrix<double>> Ds;
+Eigen::SparseMatrix<double> E;
 Eigen::SparseMatrix<double> C;
 Eigen::VectorXd b;
 Eigen::SparseMatrix<double> Q;
 Eigen::SparseMatrix<double> identityp;
 Eigen::SparseMatrix<double> identityn;
+Eigen::SparseMatrix<double> identityQ;
 Eigen::VectorXd factors0;
 double rt2 = std::sqrt(2);
 
 // Sizes of matrices
+int ogn = 0;
+int ogm = 0;
+int ogp = 0;
 int n = 0;
 int m = 0;
 int p = 0;
@@ -129,6 +143,7 @@ void prettyPrint(std::string pre, Eigen::Matrix<type, -1, 1> arr) {
 	std::cout << std::noshowpos;
 
 }
+
 // Pretty print a general 2D dense Eigen array
 template <typename type>
 void prettyPrint(std::string pre, Eigen::Matrix<type, -1, -1> arr) {
@@ -188,11 +203,6 @@ void prettyPrint(std::string pre, Eigen::SparseMatrix<type> arr) {
 
 }
 
-// Pretty print a double
-void prettyPrint(std::string pre, double val) {
-	std::cout << pre << val << std::endl;
-}
-
 // Calculate a "norm" for a 3D "matrix"
 double norm3D(std::vector<Eigen::MatrixXd> M) {
 	double val = 0;
@@ -200,25 +210,6 @@ double norm3D(std::vector<Eigen::MatrixXd> M) {
 		val += M[i].norm();
 	}
 	return val;
-}
-
-// Function turning X to x
-Eigen::VectorXd matToVec(Eigen::SparseMatrix<double> X, double extra=extraDiag) {
-
-	// Remove any extra from the diag
-	Eigen::SparseMatrix<double> XNoDiag = X - identityp*extra;
-
-	// Create a blank n vector
-	Eigen::VectorXd newVec(n);
-
-	// Extract each element
-	for (int i=0; i<n; i++) {
-		newVec(i) = XNoDiag.cwiseProduct(As[i]).sum()/2;
-	}
-
-	// Return this new vector
-	return newVec;
-
 }
 
 // Function turning x to X
@@ -229,8 +220,11 @@ Eigen::SparseMatrix<double> vecToMat(Eigen::VectorXd x, double extra=extraDiag) 
 
 	// Multiply each element by the corresponding A
 	for (int i=0; i<n; i++) {
-		newMat += As[i]*x(i);
+		newMat += Ds[i]*x(i);
 	}
+
+	// Add the E matrix
+	newMat += E;
 
 	// Add an extra diagonal so it always has an inverse
 	newMat += identityp*extra;
@@ -240,35 +234,106 @@ Eigen::SparseMatrix<double> vecToMat(Eigen::VectorXd x, double extra=extraDiag) 
 
 }
 
-// Objective function
+// Calculate the pseudo-inverse of a matrix TODO
+Eigen::SparseMatrix<double> pseudo(Eigen::SparseMatrix<double> M) {
+	return Eigen::MatrixXd(M).inverse().sparseView();
+}
+
+// Objective function CHANGE TODO
 double f(Eigen::VectorXd x) {
-	return -fScaling*((x.transpose()*Q*x)(0));
+
+	// Extract the vars from the x
+	double lambda = x(0);
+	Eigen::VectorXd y = x.segment(1, 1+numy);
+	Eigen::VectorXd z = x.tail(numz);
+
+	// Calculate and return the object function
+	return 0.5*(y.transpose()*C-z.transpose())*pseudo(Q + lambda*identityQ)*(C.transpose()*y-z) + lambda*numMats - y.transpose()*b;
+
 }
 
 // Derivative of the objective function
 Eigen::VectorXd delf(Eigen::VectorXd x) {
-	return -fScaling*2*x.transpose()*Q;
+
+	// Create an empty vector
+	Eigen::VectorXd returnVec(n);
+	Eigen::VectorXd xPlus = x;
+	Eigen::VectorXd xMinus = x;
+
+	// For the change in each element
+	for (int i=0; i<n; i++) {
+		xPlus(i) = x(i)+derivDelta;
+		xMinus(i) = x(i)-derivDelta;
+		returnVec(i) = (f(xPlus) - f(xMinus)) / (2*derivDelta);
+		xPlus(i) = x(i);
+		xMinus(i) = x(i);
+	}
+
+	// Return the derivate wrt each variable
+	return returnVec;
+
 }
 
 // Second derivative of the objective function
 Eigen::MatrixXd del2f(Eigen::VectorXd x) {
-	return -fScaling*2*Q;
+
+	// Create an empty vector
+	Eigen::MatrixXd returnMat(n, n);
+	Eigen::VectorXd xPlusiMinusj = x;
+	Eigen::VectorXd xMinusiPlusj = x;
+	Eigen::VectorXd xPlusiPlusj = x;
+	Eigen::VectorXd xMinusiMinusj = x;
+
+	// For the change in each element
+	for (int i=0; i<n; i++) {
+		for (int j=0; j<n; j++) {
+			xPlusiMinusj(i) = x(i)+derivDelta;
+			xPlusiMinusj(j) = x(j)-derivDelta;
+			xMinusiPlusj(i) = x(i)-derivDelta;
+			xMinusiPlusj(j) = x(j)+derivDelta;
+			xPlusiPlusj(i) = x(i)+derivDelta;
+			xPlusiPlusj(j) = x(j)+derivDelta;
+			xMinusiMinusj(i) = x(i)-derivDelta;
+			xMinusiMinusj(j) = x(j)-derivDelta;
+			returnMat(i, j) = (f(xPlusiPlusj) + f(xMinusiMinusj) - f(xPlusiMinusj) - f(xMinusiPlusj)) / (4*derivDelta*derivDelta);
+			xPlusiMinusj(i) = x(i);
+			xPlusiMinusj(j) = x(j);
+			xMinusiPlusj(i) = x(i);
+			xMinusiPlusj(j) = x(j);
+			xPlusiPlusj(i) = x(i);
+			xPlusiPlusj(j) = x(j);
+			xMinusiMinusj(i) = x(i);
+			xMinusiMinusj(j) = x(j);
+
+		}
+	}
+
+	// Return the Hessian
+	return returnMat;
+
 }
 				
-// Constraint function
+// Constraint function CHANGE
 Eigen::VectorXd g(Eigen::VectorXd x) {
 
 	// Create an empty vector
 	Eigen::VectorXd returnVec(m);
 
-	// Need numMats to be in "vector" form (size 1 vector)
-	Eigen::VectorXd N = Eigen::VectorXd::Constant(1, numMats);
+	// Extract the vars from the x
+	double lambda = x(0);
+	Eigen::VectorXd y = x.segment(1, 1+numy);
+	Eigen::VectorXd z = x.tail(numz);
 
-	// First element is the x^Tx = N constraint
-	returnVec.head(1) = gScaling*(N - x.transpose()*x);
+	// Calculate P
+	Eigen::MatrixXd W = Eigen::MatrixXd(Q.transpose()) + lambda*Eigen::MatrixXd(identityQ);
+	Eigen::MatrixXd P = W*((W.transpose()*W).inverse())*W.transpose();
 
-	// Last m-1 elements are the normalisation constraints
-	returnVec.tail(m-1) = 10*gScaling*(b - C*x);
+	std::cout << "here2" << std::endl; // TODO
+
+	// This is only zero if the (y^TC-z^T) is in the row space of Q
+	returnVec(0) = (P*(y.transpose()*C-z.transpose())-y.transpose()*C+z.transpose()).norm();
+
+	std::cout << "here3" << std::endl;
 
 	// Return the vector of constraints
 	return returnVec;
@@ -280,12 +345,17 @@ Eigen::MatrixXd delg(Eigen::VectorXd x) {
 
 	// Create an empty matrix
 	Eigen::MatrixXd returnMat(m, n);
+	Eigen::VectorXd xPlus = x;
+	Eigen::VectorXd xMinus = x;
 
-	// First element is the x^Tx = N constraint
-	returnMat.block(0,0,1,n) = -gScaling*2*x.transpose();
-
-	// Last m-1 elements are the normalisation constraints
-	returnMat.block(1,0,m-1,n) = -10*gScaling*C;
+	// For the change in each element
+	for (int i=0; i<n; i++) {
+		xPlus(i) = x(i)+derivDelta;
+		xMinus(i) = x(i)-derivDelta;
+		returnMat.col(i) = (g(xPlus) - g(xMinus)) / (2*derivDelta);
+		xPlus(i) = x(i);
+		xMinus(i) = x(i);
+	}
 
 	// Return the vector of constraints
 	return returnMat;
@@ -297,23 +367,37 @@ std::vector<Eigen::MatrixXd> del2g(Eigen::VectorXd x) {
 
 	// Create an empty 3D matrix (vector of matrices)
 	std::vector<Eigen::MatrixXd> returnMat(n, Eigen::MatrixXd::Zero(n, m));
+	Eigen::VectorXd xPlusiMinusj = x;
+	Eigen::VectorXd xMinusiPlusj = x;
+	Eigen::VectorXd xPlusiPlusj = x;
+	Eigen::VectorXd xMinusiMinusj = x;
 
-	// The x^Tx = N constraint
+	// For the change in each element
 	for (int i=0; i<n; i++) {
-		returnMat[i].col(0) = gScaling*Eigen::MatrixXd::Constant(n, 1, 2);
+		for (int j=0; j<n; j++) {
+			xPlusiMinusj(i) = x(i)+derivDelta;
+			xPlusiMinusj(j) = x(j)-derivDelta;
+			xMinusiPlusj(i) = x(i)-derivDelta;
+			xMinusiPlusj(j) = x(j)+derivDelta;
+			xPlusiPlusj(i) = x(i)+derivDelta;
+			xPlusiPlusj(j) = x(j)+derivDelta;
+			xMinusiMinusj(i) = x(i)-derivDelta;
+			xMinusiMinusj(j) = x(j)-derivDelta;
+			returnMat[i].row(j) = (g(xPlusiPlusj) + g(xMinusiMinusj) - g(xPlusiMinusj) - g(xMinusiPlusj)) / (4*derivDelta*derivDelta);
+			xPlusiMinusj(i) = x(i);
+			xPlusiMinusj(j) = x(j);
+			xMinusiPlusj(i) = x(i);
+			xMinusiPlusj(j) = x(j);
+			xPlusiPlusj(i) = x(i);
+			xPlusiPlusj(j) = x(j);
+			xMinusiMinusj(i) = x(i);
+			xMinusiMinusj(j) = x(j);
+		}
 	}
 
-	// Return the vector of constraints
+	// Return the Hessian
 	return returnMat;
 
-}
-
-// The dual TODO check
-double dual(Eigen::VectorXd y, Eigen::SparseMatrix<double> Z) {
-	Eigen::VectorXd z = matToVec(Z, 0);
-	Eigen::VectorXd temp = C.transpose()*y.tail(m-1) - z;
-	Eigen::VectorXd res = -0.5 * temp.transpose()*(Eigen::MatrixXd(Q + y.head(1)(0)*identityp).inverse()*temp) - y.head(1)*numMats - y.tail(m-1).transpose()*b;
-	return res(0);
 }
 
 // The Lagrangian 
@@ -638,7 +722,7 @@ int main(int argc, char ** argv) {
 	// Start the timer 
 	auto t1 = std::chrono::high_resolution_clock::now();
 
-	// Useful quantities
+	// Useful quantities CHANGE
 	numPerm = sets*(sets-1)/2;
 	numMeasureB = sets;
 	numOutcomeB = d;
@@ -648,22 +732,17 @@ int main(int argc, char ** argv) {
 	numRhoMats = numPerm*numOutcomeB*numOutcomeB;
 	numBMats = numMeasureB*numOutcomeB;
 	numMats = numRhoMats + numBMats;
+	numLambda = 1;
+	numy = numMeasureB*numUniquePer + numMats;
+	numz = numMats*numUniquePer;
+	ogn = numMats*numUniquePer;
+	ogm = 1 + numMeasureB*numUniquePer + numMats;
+	ogp = numMats*d*2;
 
-	// Sizes of matrices
-	n = numMats*numUniquePer;
-	m = 1 + numMeasureB*numUniquePer + numMats;
-	p = numMats*d*2;
-	halfP = p / 2;
-
-	// Cache an identity matrix
-	identityp = Eigen::MatrixXd::Identity(p, p).sparseView();
-	identityn = Eigen::MatrixXd::Identity(n, n).sparseView();
-
-	// A vector which has 0 on the terms which will become off-diagonals
-	factors0 = Eigen::VectorXd::Constant(numUniquePer, 0);
-	for (int j=0; j<d; j++) {
-		factors0(j*(2*d-j+1)/2) = 1;
-	}
+	// Sizes of matrices CHANGE
+	n = numLambda + numy + numz;
+	m = 1;
+	p = 1 + numMats*d*2;
 
 	// Output various bits of info about the problem/parameters
 	if (outputMode == "") {
@@ -672,12 +751,10 @@ int main(int argc, char ** argv) {
 		std::cout << "--------------------------------" << std::endl;
 		std::cout << "               d = " << d << std::endl;
 		std::cout << "            sets = " << sets << std::endl;
-		std::cout << "        num rhos = " << numRhoMats << std::endl;
-		std::cout << "          num Bs = " << numBMats << std::endl;
-		std::cout << "    vals per mat = " << numUniquePer << std::endl;
 		std::cout << "  size of vector = " << n << " ~ " << n*16 / (1024*1024) << " MB " << std::endl;
 		std::cout << "  size of matrix = " << p << " x " << p << " ~ " << p*p*16 / (1024*1024) << " MB " << std::endl;
-		std::cout << "" << std::endl;
+		std::cout << "  num constaints = " << m << std::endl;
+		std::cout << std::endl;
 		std::cout << "--------------------------------" << std::endl;
 		std::cout << "        Parameters Used           " << std::endl;;
 		std::cout << "--------------------------------" << std::endl;
@@ -693,14 +770,26 @@ int main(int argc, char ** argv) {
 		std::cout << "           gamma = " << gamma << std::endl;
 		std::cout << "            beta = " << beta << std::endl;
 		std::cout << "           cores = " << numCores << std::endl;
-		std::cout << "" << std::endl;
+		std::cout << std::endl;
+	}
+
+	// Cache some identity matrices
+	identityQ = Eigen::MatrixXd::Identity(ogn, ogn).sparseView();
+	identityp = Eigen::MatrixXd::Identity(p, p).sparseView();
+	identityn = Eigen::MatrixXd::Identity(n, n).sparseView();
+	halfP = p / 2;
+
+	// A vector which has 0 on the terms which will become off-diagonals
+	factors0 = Eigen::VectorXd::Constant(numUniquePer, 0);
+	for (int j=0; j<d; j++) {
+		factors0(j*(2*d-j+1)/2) = 1;
 	}
 
 	// The "ideal" value
 	double maxVal = d*d*numPerm*(1+1/std::sqrt(d));
 
-	// Calculate the Q matrix defining the objective
-	Q = Eigen::SparseMatrix<double>(n, n);
+	// Calculate the Q matrix defining the objective CHANGE
+	Q = Eigen::SparseMatrix<double>(ogn, ogn);
 	std::vector<Eigen::Triplet<double>> tripsQ;
 
 	// For each pairing of B matrices
@@ -740,9 +829,9 @@ int main(int argc, char ** argv) {
 
 	// Construct Q from these triplets
 	Q.setFromTriplets(tripsQ.begin(), tripsQ.end());
-	
-	// Calculate the C matrix defining the normalisation constraints
-	C = Eigen::SparseMatrix<double>(m-1, n);
+
+	// Calculate the C matrix defining the normalisation constraints CHANGE
+	C = Eigen::SparseMatrix<double>(ogm-1, ogn);
 	std::vector<Eigen::Triplet<double>> tripsC;
 
 	// The first part are the sum to identity constraints
@@ -784,21 +873,21 @@ int main(int argc, char ** argv) {
 	// Construct C from these triplets
 	C.setFromTriplets(tripsC.begin(), tripsC.end());
 	
-	// Calculate the b vector defining the normalisation constraints
-	b = Eigen::VectorXd::Ones(m-1);
+	// Calculate the b vector defining the normalisation constraints CHANGE
+	b = Eigen::VectorXd::Ones(ogm-1);
 	for (int i=0; i<numMeasureB*numUniquePer; i++) {
 		b(i) = factors0(i % numUniquePer);
 	}
 
-	// Calculate the A matrices for turning x -> X
-	As = std::vector<Eigen::SparseMatrix<double>>(n);
+	// Calculate the A matrices CHANGE
+	As = std::vector<Eigen::SparseMatrix<double>>(ogn);
 	double oneOverRt2 = 1.0 / std::sqrt(2);
 	int matx = 0;
 	int maty = 0;
-	for (int i=0; i<n; i++) {
+	for (int i=0; i<ogn; i++) {
 
 		// For each A
-		Eigen::SparseMatrix<double> A(p, p);
+		Eigen::SparseMatrix<double> A(ogp, ogp);
 		std::vector<Eigen::Triplet<double>> tripsA;
 
 		// The location of the matrix for this element
@@ -834,7 +923,7 @@ int main(int argc, char ** argv) {
 
 			}
 
-		// If it's a non-diagonal
+		// If it's a diagonal
 		} else {
 			tripsA.push_back(Eigen::Triplet<double>(matLoc+matx, matLoc+maty, 1));
 			tripsA.push_back(Eigen::Triplet<double>(matLoc+matx+d, matLoc+maty+d, 1));
@@ -861,6 +950,72 @@ int main(int argc, char ** argv) {
 
 	}
 
+	// Calculate the D matrices CHANGE
+	Ds = std::vector<Eigen::SparseMatrix<double>>(n);
+
+	// The first part is for lambda
+	for (int i=0; i<numLambda; i++) {
+
+		// For each D
+		Eigen::SparseMatrix<double> D(p, p);
+		std::vector<Eigen::Triplet<double>> tripsD;
+
+		// Identity in the top left
+		for (int j=0; j<ogn; j++) {
+			tripsD.push_back(Eigen::Triplet<double>(j, j, 1));
+		}
+
+		// Construct this sparse matrix
+		D.setFromTriplets(tripsD.begin(), tripsD.end());
+
+		// Add to the list
+		Ds[i] = D;
+
+	}
+
+	// The second part is for y
+	for (int i=numLambda; i<numLambda+numy; i++) {
+
+		// For each D
+		Eigen::SparseMatrix<double> D(p, p);
+
+		// Add to the list
+		Ds[i] = D;
+
+	}
+
+	// The last part is for z TODO
+	for (int i=0; i<ogn; i++) {
+
+		// For each D
+		Eigen::SparseMatrix<double> D(p, p);
+		std::vector<Eigen::Triplet<double>> tripsD;
+
+		// Loop over all non-zero elements
+		for (int k=0; k<As[i].outerSize(); ++k) {
+			for (Eigen::SparseMatrix<double>::InnerIterator it(As[i], k); it; ++it) {
+				tripsD.push_back(Eigen::Triplet<double>(it.row()+1, it.col()+1, it.value()));
+			}
+		}
+
+		// Construct this sparse matrix
+		D.setFromTriplets(tripsD.begin(), tripsD.end());
+
+		// Add to the list
+		Ds[i+numLambda+numy] = D;
+
+	}
+
+	// Calculate the E matrix for turning x -> X CHANGE
+	E = Eigen::SparseMatrix<double>(p, p);
+	std::vector<Eigen::Triplet<double>> tripsE;
+
+	// Top left element is the lowest eigenvalue of Q
+	tripsE.push_back(Eigen::Triplet<double>(0, 0, -Eigen::MatrixXd(Q).eigenvalues().real().minCoeff()));
+
+	// Construct this sparse matrix
+	E.setFromTriplets(tripsE.begin(), tripsE.end());
+
 	// The primal var (and alt forms)
 	Eigen::VectorXd x = Eigen::VectorXd::Zero(n);
 	Eigen::SparseMatrix<double> X(p, p);
@@ -871,378 +1026,8 @@ int main(int argc, char ** argv) {
 	Eigen::SparseMatrix<double> Z(p, p);
 	Eigen::MatrixXd ZDense = Eigen::MatrixXd::Zero(p, p);
 
-	// Seed so it's random each time
-	if (initMode == "random") {
-		srand((unsigned int) time(0));
-	}
-
-	// If starting with a random matrix (seeded or not)
-	if (initMode == "random" || initMode == "fixed") {
-
-		// Start with a bunch of projective measurements TODO
-
-	// Use nearby the optimum
-	} else if (initMode == "nearby") {
-
-		// Allow entry as the list of matrices
-		std::vector<std::vector<std::vector<std::complex<double>>>> Ms(numMeasureB*numOutcomeB);
-
-		// From the seesaw
-		if (d == 2 && sets == 2) {
-			Ms[0] = { { 1.0, 0.0 }, 
-					  { 0.0, 0.0 } };
-			Ms[1] = { { 0.0, 0.0 }, 
-					  { 0.0, 1.0 } };
-			Ms[2] = { { 0.5, 0.5 }, 
-					  { 0.5, 0.5 } };
-			Ms[3] = { { 0.5,-0.5 }, 
-					  {-0.5, 0.5 } };
-		} else if (d == 2 && sets == 3) {
-			Ms[0] = { { 1.0, 0.0 }, 
-					  { 0.0, 0.0 } };
-			Ms[1] = { { 0.0, 0.0 }, 
-					  { 0.0, 1.0 } };
-			Ms[2] = { { 0.5,-0.5 }, 
-					  {-0.5, 0.5 } };
-			Ms[3] = { { 0.5, 0.5 }, 
-					  { 0.5, 0.5 } };
-			Ms[4] = { {  0.5, 0.5i }, 
-					  {-0.5i, 0.5 } };
-			Ms[5] = { {  0.5,-0.5i }, 
-					  { 0.5i, 0.5 } };
-		} else if (d == 2 && sets == 4) {
-			Ms[0] = { {  0.90+0.00i,  0.15+0.26i },
-				      {  0.15-0.26i,  0.10+0.00i } };
-		    Ms[1] = { {  0.10+0.00i, -0.15-0.26i },
-				      { -0.15+0.26i,  0.90+0.00i } };
-		    Ms[2] = { {  0.58+0.00i, -0.46-0.18i },
-				      { -0.46+0.18i,  0.42+0.00i } };
-		    Ms[3] = { {  0.42+0.00i,  0.46+0.18i },
-				      {  0.46-0.18i,  0.58+0.00i } };
-		    Ms[4] = { {  0.10+0.00i, -0.01+0.30i },
-				      { -0.01-0.30i,  0.90+0.00i } };
-		    Ms[5] = { {  0.90+0.00i,  0.01-0.30i },
-				      {  0.01+0.30i,  0.10+0.00i } };
-		    Ms[6] = { {  0.58+0.00i, -0.31+0.38i },
-		 		      { -0.31-0.38i,  0.42+0.00i } };
-		    Ms[7] = { {  0.42+0.00i,  0.31-0.38i },
-				      {  0.31+0.38i,  0.58+0.00i } };
-		} else if (d == 3 && sets == 5) {
-		    Ms[0] = {  {  0.50+0.00i, -0.25-0.40i,  0.11-0.12i },
-                       { -0.25+0.40i,  0.45+0.00i,  0.04+0.15i },
-                       {  0.11+0.12i,  0.04-0.15i,  0.05+0.00i } };
-		    Ms[1] = {  {  0.18+0.00i,  0.00+0.07i, -0.18+0.33i },
-                       {  0.00-0.07i,  0.03+0.00i,  0.13+0.08i },
-                       { -0.18-0.33i,  0.13-0.08i,  0.79+0.00i } };
-		    Ms[2] = {  {  0.33+0.00i,  0.25+0.33i,  0.07-0.21i },
-                       {  0.25-0.33i,  0.52+0.00i, -0.16-0.23i },
-                       {  0.07+0.21i, -0.16+0.23i,  0.15+0.00i } };
-		    Ms[3] = {  {  0.09+0.00i, -0.01+0.07i,  0.19-0.20i },
-                       { -0.01-0.07i,  0.05+0.00i, -0.18-0.11i },
-                       {  0.19+0.20i, -0.18+0.11i,  0.86+0.00i } };
-		    Ms[4] = {  {  0.78+0.00i, -0.29+0.06i, -0.24+0.16i },
-                       { -0.29-0.06i,  0.11+0.00i,  0.10-0.04i },
-                       { -0.24-0.16i,  0.10+0.04i,  0.11+0.00i } };
-		    Ms[5] = {  {  0.13+0.00i,  0.30-0.12i,  0.05+0.04i },
-                       {  0.30+0.12i,  0.84+0.00i,  0.08+0.15i },
-                       {  0.05-0.04i,  0.08-0.15i,  0.03+0.00i } };
-		    Ms[6] = {  {  0.19+0.00i, -0.17+0.24i, -0.17-0.19i },
-                       { -0.17-0.24i,  0.47+0.00i, -0.09+0.39i },
-                       { -0.17+0.19i, -0.09-0.39i,  0.35+0.00i } };
-		    Ms[7] = {  {  0.14+0.00i, -0.02-0.26i, -0.23+0.03i },
-                       { -0.02+0.26i,  0.48+0.00i, -0.03-0.43i },
-                       { -0.23-0.03i, -0.03+0.43i,  0.38+0.00i } };
-		    Ms[8] = {  {  0.67+0.00i,  0.19+0.02i,  0.40+0.16i },
-                       {  0.19-0.02i,  0.05+0.00i,  0.12+0.03i },
-                       {  0.40-0.16i,  0.12-0.03i,  0.27+0.00i } };
-		    Ms[9] = {  {  0.57+0.00i,  0.35+0.02i, -0.32+0.12i },
-                       {  0.35-0.02i,  0.22+0.00i, -0.19+0.09i },
-                       { -0.32-0.12i, -0.19-0.09i,  0.21+0.00i } };
-		    Ms[10] = { {  0.07+0.00i,  0.02-0.15i,  0.07-0.19i },
-                       {  0.02+0.15i,  0.33+0.00i,  0.44+0.08i },
-                       {  0.07+0.19i,  0.44-0.08i,  0.60+0.00i } };
-		    Ms[11] = { {  0.35+0.00i, -0.38+0.13i,  0.25+0.07i },
-                       { -0.38-0.13i,  0.45+0.00i, -0.24-0.17i },
-                       {  0.25-0.07i, -0.24+0.17i,  0.20+0.00i } };
-		    Ms[12] = { {  0.18+0.00i, -0.09+0.32i,  0.02+0.19i },
-                       { -0.09-0.32i,  0.61+0.00i,  0.34-0.13i },
-                       {  0.02-0.19i,  0.34+0.13i,  0.21+0.00i } };
-		    Ms[13] = { {  0.15+0.00i,  0.02-0.24i,  0.10+0.25i },
-                       {  0.02+0.24i,  0.37+0.00i, -0.38+0.19i },
-                       {  0.10-0.25i, -0.38-0.19i,  0.48+0.00i } };
-		    Ms[14] = { {  0.67+0.00i,  0.07-0.08i, -0.12-0.44i },
-                       {  0.07+0.08i,  0.02+0.00i,  0.04-0.06i },
-                       { -0.12+0.44i,  0.04+0.06i,  0.31+0.00i } };
-		} else if (d == 4 && sets == 4) {
-			Ms[0] = {  {  0.39+0.00i, -0.29-0.12i,  0.16+0.26i,  0.17-0.14i },
-					   { -0.29+0.12i,  0.25+0.00i, -0.20-0.14i, -0.08+0.15i },
-					   {  0.16-0.26i, -0.20+0.14i,  0.24+0.00i, -0.02-0.17i },
-					   {  0.17+0.14i, -0.08-0.15i, -0.02+0.17i,  0.12+0.00i } };
-			Ms[1] = {  {  0.24+0.00i,  0.27+0.26i,  0.03+0.10i,  0.05+0.17i },
-                       {  0.27-0.26i,  0.59+0.00i,  0.14+0.07i,  0.24+0.14i },
-                       {  0.03-0.10i,  0.14-0.07i,  0.04+0.00i,  0.08+0.00i },
-                       {  0.05-0.17i,  0.24-0.14i,  0.08-0.00i,  0.13+0.00i }  };
-			Ms[2] = {  {  0.11+0.00i, -0.06-0.11i,  0.08-0.15i, -0.10+0.20i },
-					   { -0.06+0.11i,  0.14+0.00i,  0.11+0.16i, -0.15-0.21i },
-                       {  0.08+0.15i,  0.11-0.16i,  0.27+0.00i, -0.36+0.01i },
-                       { -0.10-0.20i, -0.15+0.21i, -0.36-0.01i,  0.49+0.00i } };
-			Ms[3] = {  {  0.27+0.00i,  0.07-0.03i, -0.28-0.21i, -0.12-0.23i },
-					   {  0.07+0.03i,  0.02+0.00i, -0.05-0.09i, -0.00-0.08i },
-					   { -0.28+0.21i, -0.05+0.09i,  0.45+0.00i,  0.31+0.15i },
-                       { -0.12+0.23i, -0.00+0.08i,  0.31-0.15i,  0.26+0.00i } };
-			Ms[4] = {  {  0.10+0.00i, -0.18-0.07i,  0.02+0.10i, -0.21-0.02i },
-                       { -0.18+0.07i,  0.37+0.00i, -0.11-0.16i,  0.38-0.11i },
-                       {  0.02-0.10i, -0.11+0.16i,  0.10+0.00i, -0.07+0.20i },
-                       { -0.21+0.02i,  0.38+0.11i, -0.07-0.20i,  0.43+0.00i } };
-			Ms[5] = {  {  0.26+0.00i,  0.09-0.12i,  0.38-0.12i,  0.08-0.05i },
-                       {  0.09+0.12i,  0.09+0.00i,  0.19+0.14i,  0.05+0.02i },
-                       {  0.38+0.12i,  0.19-0.14i,  0.62+0.00i,  0.15-0.04i },
-                       {  0.08+0.05i,  0.05-0.02i,  0.15+0.04i,  0.04+0.00i } };
-			Ms[6] = {  {  0.06+0.00i,  0.07+0.17i, -0.01-0.02i, -0.08-0.13i },
-                       {  0.07-0.17i,  0.54+0.00i, -0.06-0.00i, -0.45+0.08i },
-                       { -0.01+0.02i, -0.06+0.00i,  0.01+0.00i,  0.05-0.01i },
-                       { -0.08+0.13i, -0.45-0.08i,  0.05+0.01i,  0.39+0.00i } };
-			Ms[7] = {  {  0.58+0.00i,  0.03+0.02i, -0.40+0.04i,  0.21+0.20i },
-                       {  0.03-0.02i,  0.00+0.00i, -0.02+0.02i,  0.02+0.00i },
-                       { -0.40-0.04i, -0.02-0.02i,  0.27+0.00i, -0.13-0.15i },
-                       {  0.21-0.20i,  0.02-0.00i, -0.13+0.15i,  0.15+0.00i } };
-			Ms[8] = {  {  0.30+0.00i, -0.39+0.02i, -0.13-0.18i, -0.03-0.05i },
-                       { -0.39-0.02i,  0.52+0.00i,  0.16+0.25i,  0.04+0.07i },
-                       { -0.13+0.18i,  0.16-0.25i,  0.17+0.00i,  0.05+0.00i },
-                       { -0.03+0.05i,  0.04-0.07i,  0.05-0.00i,  0.01+0.00i } };
-			Ms[9] = {  {  0.34+0.00i,  0.22+0.01i,  0.04+0.13i,  0.15-0.37i },
-                       {  0.22-0.01i,  0.15+0.00i,  0.03+0.08i,  0.09-0.25i },
-                       {  0.04-0.13i,  0.03-0.08i,  0.05+0.00i, -0.12-0.10i },
-                       {  0.15+0.37i,  0.09+0.25i, -0.12+0.10i,  0.46+0.00i } };
-			Ms[10] = { {  0.08+0.00i,  0.13+0.07i,  0.04-0.20i, -0.03+0.08i },
-                       {  0.13-0.07i,  0.29+0.00i, -0.10-0.38i,  0.01+0.16i },
-                       {  0.04+0.20i, -0.10+0.38i,  0.54+0.00i, -0.22-0.05i },
-                       { -0.03-0.08i,  0.01-0.16i, -0.22+0.05i,  0.09+0.00i } };
-			Ms[11] = { {  0.29+0.00i,  0.03-0.10i,  0.06+0.26i, -0.08+0.34i },
-                       {  0.03+0.10i,  0.04+0.00i, -0.09+0.05i, -0.13+0.01i },
-                       {  0.06-0.26i, -0.09-0.05i,  0.24+0.00i,  0.29+0.14i },
-                       { -0.08-0.34i, -0.13-0.01i,  0.29-0.14i,  0.43+0.00i } };
-			Ms[12] = { {  0.03+0.00i, -0.03+0.04i, -0.02-0.08i, -0.12+0.00i },
-                       { -0.03-0.04i,  0.09+0.00i, -0.09+0.12i,  0.15+0.18i },
-                       { -0.02+0.08i, -0.09-0.12i,  0.27+0.00i,  0.10-0.40i },
-                       { -0.12-0.00i,  0.15-0.18i,  0.10+0.40i,  0.62+0.00i } };
-			Ms[13] = { {  0.19+0.00i, -0.03+0.14i, -0.08+0.31i, -0.10-0.13i },
-                       { -0.03-0.14i,  0.11+0.00i,  0.25+0.01i, -0.08+0.10i },
-                       { -0.08-0.31i,  0.25-0.01i,  0.56+0.00i, -0.17+0.22i },
-                       { -0.10+0.13i, -0.08-0.10i, -0.17-0.22i,  0.14+0.00i } };
-			Ms[14] = { {  0.37+0.00i, -0.11+0.27i,  0.16-0.19i,  0.28+0.10i },
-                       { -0.11-0.27i,  0.23+0.00i, -0.19-0.05i, -0.02-0.23i },
-                       {  0.16+0.19i, -0.19+0.05i,  0.16+0.00i,  0.07+0.18i },
-                       {  0.28-0.10i, -0.02+0.23i,  0.07-0.18i,  0.23+0.00i } };
-			Ms[15] = { {  0.41+0.00i,  0.18-0.45i, -0.05-0.04i, -0.05+0.03i },
-                       {  0.18+0.45i,  0.57+0.00i,  0.03-0.07i, -0.05-0.05i },
-                       { -0.05+0.04i,  0.03+0.07i,  0.01+0.00i,  0.00-0.01i },
-                       { -0.05-0.03i, -0.05+0.05i,  0.00+0.01i,  0.01+0.00i } };
-		} else if (d == 6 && sets == 4) {
-			Ms[0] = {  {  0.17+0.00i, -0.11+0.01i,  0.09+0.09i, -0.03+0.17i,  0.12-0.16i,  0.18-0.13i },
-                       { -0.11-0.01i,  0.06+0.00i, -0.05-0.06i,  0.02-0.10i, -0.08+0.09i, -0.11+0.07i },
-                       {  0.09-0.09i, -0.05+0.06i,  0.09+0.00i,  0.07+0.10i, -0.01-0.15i,  0.03-0.16i },
-                       { -0.03-0.17i,  0.02+0.10i,  0.07-0.10i,  0.16+0.00i, -0.17-0.09i, -0.15-0.15i },
-                       {  0.12+0.16i, -0.08-0.09i, -0.01+0.15i, -0.17+0.09i,  0.23+0.00i,  0.24+0.06i },
-                       {  0.18+0.13i, -0.11-0.07i,  0.03+0.16i, -0.15+0.15i,  0.24-0.06i,  0.28+0.00i } };
-			Ms[1] = {  {  0.07+0.00i,  0.11-0.12i, -0.05-0.07i,  0.12-0.06i,  0.07-0.02i,  0.05-0.03i },
-                       {  0.11+0.12i,  0.42+0.00i,  0.05-0.23i,  0.30+0.13i,  0.16+0.09i,  0.15+0.03i },
-                       { -0.05+0.07i,  0.05+0.23i,  0.13+0.00i, -0.03+0.18i, -0.03+0.09i, -0.00+0.08i },
-                       {  0.12+0.06i,  0.30-0.13i, -0.03-0.18i,  0.25+0.00i,  0.14+0.02i,  0.11-0.02i },
-                       {  0.07+0.02i,  0.16-0.09i, -0.03-0.09i,  0.14-0.02i,  0.08+0.00i,  0.06-0.02i },
-                       {  0.05+0.03i,  0.15-0.03i, -0.00-0.08i,  0.11+0.02i,  0.06+0.02i,  0.05+0.00i } };
-			Ms[2] = {  {  0.06+0.00i,  0.03+0.03i,  0.08-0.11i, -0.13-0.09i,  0.04+0.01i, -0.02-0.05i },
-                       {  0.03-0.03i,  0.04+0.00i, -0.02-0.12i, -0.14+0.03i,  0.03-0.02i, -0.04-0.02i },
-                       {  0.08+0.11i, -0.02+0.12i,  0.34+0.00i, -0.01-0.40i,  0.05+0.10i,  0.07-0.11i },
-                       { -0.13+0.09i, -0.14-0.03i, -0.01+0.40i,  0.48+0.00i, -0.11+0.06i,  0.13+0.09i },
-                       {  0.04-0.01i,  0.03+0.02i,  0.05-0.10i, -0.11-0.06i,  0.03+0.00i, -0.02-0.04i },
-                       { -0.02+0.05i, -0.04+0.02i,  0.07+0.11i,  0.13-0.09i, -0.02+0.04i,  0.05+0.00i } };
-			Ms[3] = {  {  0.04+0.00i,  0.05-0.04i,  0.06+0.01i, -0.02-0.02i, -0.09-0.11i,  0.02+0.12i },
-                       {  0.05+0.04i,  0.08+0.00i,  0.06+0.07i, -0.01-0.04i, -0.01-0.19i, -0.08+0.15i },
-                       {  0.06-0.01i,  0.06-0.07i,  0.09+0.00i, -0.04-0.02i, -0.16-0.12i,  0.06+0.16i },
-                       { -0.02+0.02i, -0.01+0.04i, -0.04+0.02i,  0.02+0.00i,  0.08+0.02i, -0.05-0.05i },
-                       { -0.09+0.11i, -0.01+0.19i, -0.16+0.12i,  0.08-0.02i,  0.43+0.00i, -0.32-0.20i },
-                       {  0.02-0.12i, -0.08-0.15i,  0.06-0.16i, -0.05+0.05i, -0.32+0.20i,  0.33+0.00i } };
-			Ms[4] = {  {  0.13+0.00i,  0.17-0.03i, -0.03+0.19i, -0.08+0.02i, -0.11+0.10i, -0.06-0.12i },
-                       {  0.17+0.03i,  0.23+0.00i, -0.08+0.24i, -0.10+0.01i, -0.16+0.11i, -0.05-0.18i },
-                       { -0.03-0.19i, -0.08-0.24i,  0.28+0.00i,  0.05+0.11i,  0.17+0.14i, -0.17+0.12i },
-                       { -0.08-0.02i, -0.10-0.01i,  0.05-0.11i,  0.05+0.00i,  0.08-0.04i,  0.02+0.08i },
-                       { -0.11-0.10i, -0.16-0.11i,  0.17-0.14i,  0.08+0.04i,  0.17+0.00i, -0.05+0.15i },
-                       { -0.06+0.12i, -0.05+0.18i, -0.17-0.12i,  0.02-0.08i, -0.05-0.15i,  0.15+0.00i } };
-			Ms[5] = {  {  0.53+0.00i, -0.26+0.15i, -0.15-0.10i,  0.14-0.02i, -0.04+0.18i, -0.16+0.22i },
-                       { -0.26-0.15i,  0.16+0.00i,  0.05+0.09i, -0.08-0.03i,  0.07-0.07i,  0.14-0.06i },
-                       { -0.15+0.10i,  0.05-0.09i,  0.06+0.00i, -0.04+0.03i, -0.02-0.06i,  0.01-0.09i },
-                       {  0.14+0.02i, -0.08+0.03i, -0.04-0.03i,  0.04+0.00i, -0.02+0.05i, -0.05+0.05i },
-                       { -0.04-0.18i,  0.07+0.07i, -0.02+0.06i, -0.02-0.05i,  0.06+0.00i,  0.09+0.04i },
-                       { -0.16-0.22i,  0.14+0.06i,  0.01+0.09i, -0.05-0.05i,  0.09-0.04i,  0.14+0.00i } };
-			Ms[6] = {  {  0.21+0.00i, -0.14-0.13i,  0.21+0.18i,  0.07-0.10i, -0.04-0.13i, -0.14-0.04i },
-                       { -0.14+0.13i,  0.17+0.00i, -0.25+0.01i,  0.02+0.11i,  0.10+0.06i,  0.12-0.07i },
-                       {  0.21-0.18i, -0.25-0.01i,  0.36+0.00i, -0.02-0.15i, -0.15-0.10i, -0.18+0.09i },
-                       {  0.07+0.10i,  0.02-0.11i, -0.02+0.15i,  0.07+0.00i,  0.05-0.06i, -0.03-0.08i },
-                       { -0.04+0.13i,  0.10-0.06i, -0.15+0.10i,  0.05+0.06i,  0.08+0.00i,  0.05-0.08i },
-                       { -0.14+0.04i,  0.12+0.07i, -0.18-0.09i, -0.03+0.08i,  0.05+0.08i,  0.11+0.00i } };
-			Ms[7] = {  {  0.18+0.00i,  0.22+0.04i, -0.07-0.08i, -0.01-0.02i,  0.02+0.08i, -0.27+0.05i },
-                       {  0.22-0.04i,  0.28+0.00i, -0.11-0.09i, -0.02-0.02i,  0.04+0.09i, -0.33+0.12i },
-                       { -0.07+0.08i, -0.11+0.09i,  0.07+0.00i,  0.01+0.00i, -0.05-0.02i,  0.09-0.15i },
-                       { -0.01+0.02i, -0.02+0.02i,  0.01-0.00i,  0.00+0.00i, -0.01-0.00i,  0.01-0.03i },
-                       {  0.02-0.08i,  0.04-0.09i, -0.05+0.02i, -0.01+0.00i,  0.04+0.00i, -0.01+0.13i },
-                       { -0.27-0.05i, -0.33-0.12i,  0.09+0.15i,  0.01+0.03i, -0.01-0.13i,  0.42+0.00i } };
-			Ms[8] = {  {  0.43+0.00i, -0.12-0.11i, -0.22-0.22i, -0.16-0.03i, -0.05-0.04i,  0.26-0.13i },
-                       { -0.12+0.11i,  0.07+0.00i,  0.12+0.00i,  0.05-0.03i,  0.02-0.00i, -0.04+0.11i },
-                       { -0.22+0.22i,  0.12-0.00i,  0.23+0.00i,  0.10-0.07i,  0.04-0.01i, -0.07+0.21i },
-                       { -0.16+0.03i,  0.05+0.03i,  0.10+0.07i,  0.06+0.00i,  0.02+0.01i, -0.09+0.07i },
-                       { -0.05+0.04i,  0.02+0.00i,  0.04+0.01i,  0.02-0.01i,  0.01+0.00i, -0.02+0.04i },
-                       {  0.26+0.13i, -0.04-0.11i, -0.07-0.21i, -0.09-0.07i, -0.02-0.04i,  0.20+0.00i } };
-			Ms[9] = {  {  0.09+0.00i,  0.01+0.16i, -0.02+0.03i,  0.12+0.09i,  0.01-0.13i,  0.06+0.10i },
-                       {  0.01-0.16i,  0.30+0.00i,  0.05+0.04i,  0.19-0.21i, -0.24-0.04i,  0.19-0.09i },
-                       { -0.02-0.03i,  0.05-0.04i,  0.01+0.00i,  0.00-0.06i, -0.04+0.02i,  0.02-0.04i },
-                       {  0.12-0.09i,  0.19+0.21i,  0.00+0.06i,  0.26+0.00i, -0.12-0.19i,  0.18+0.07i },
-                       {  0.01+0.13i, -0.24+0.04i, -0.04-0.02i, -0.12+0.19i,  0.19+0.00i, -0.14+0.10i },
-                       {  0.06-0.10i,  0.19+0.09i,  0.02+0.04i,  0.18-0.07i, -0.14-0.10i,  0.15+0.00i } };
-			Ms[10] = { {  0.09+0.00i, -0.01+0.03i,  0.08+0.07i,  0.04+0.03i,  0.05+0.23i,  0.08+0.02i },
-                       { -0.01-0.03i,  0.01+0.00i,  0.02-0.04i,  0.01-0.02i,  0.09-0.04i,  0.00-0.04i },
-                       {  0.08-0.07i,  0.02+0.04i,  0.14+0.00i,  0.07-0.01i,  0.24+0.17i,  0.10-0.05i },
-                       {  0.04-0.03i,  0.01+0.02i,  0.07+0.01i,  0.04+0.00i,  0.11+0.10i,  0.05-0.02i },
-                       {  0.05-0.23i,  0.09+0.04i,  0.24-0.17i,  0.11-0.10i,  0.64+0.00i,  0.11-0.21i },
-                       {  0.08-0.02i,  0.00+0.04i,  0.10+0.05i,  0.05+0.02i,  0.11+0.21i,  0.09+0.00i } };
-			Ms[11] = { {  0.01+0.00i,  0.03+0.01i,  0.03+0.02i, -0.06+0.02i, -0.00-0.02i,  0.01-0.00i },
-                       {  0.03-0.01i,  0.17+0.00i,  0.16+0.07i, -0.25+0.18i, -0.02-0.08i,  0.06-0.03i },
-                       {  0.03-0.02i,  0.16-0.07i,  0.19+0.00i, -0.17+0.28i, -0.05-0.06i,  0.04-0.06i },
-                       { -0.06-0.02i, -0.25-0.18i, -0.17-0.28i,  0.57+0.00i, -0.05+0.14i, -0.12-0.01i },
-                       { -0.00+0.02i, -0.02+0.08i, -0.05+0.06i, -0.05-0.14i,  0.04+0.00i,  0.01+0.03i },
-                       {  0.01+0.00i,  0.06+0.03i,  0.04+0.06i, -0.12+0.01i,  0.01-0.03i,  0.03+0.00i } };
-			Ms[12] = { {  0.07+0.00i, -0.20-0.12i,  0.01+0.04i,  0.05-0.00i,  0.05+0.08i,  0.05-0.02i },
-                       { -0.20+0.12i,  0.72+0.00i, -0.09-0.09i, -0.13+0.09i, -0.25-0.15i, -0.09+0.13i },
-                       {  0.01-0.04i, -0.09+0.09i,  0.02+0.00i,  0.00-0.03i,  0.05-0.01i, -0.00-0.03i },
-                       {  0.05+0.00i, -0.13-0.09i,  0.00+0.03i,  0.03+0.00i,  0.03+0.06i,  0.03-0.01i },
-                       {  0.05-0.08i, -0.25+0.15i,  0.05+0.01i,  0.03-0.06i,  0.12+0.00i,  0.01-0.06i },
-                       {  0.05+0.02i, -0.09-0.13i, -0.00+0.03i,  0.03+0.01i,  0.01+0.06i,  0.03+0.00i } };
-			Ms[13] = { {  0.12+0.00i, -0.03+0.02i, -0.05-0.07i, -0.07-0.21i, -0.21+0.05i, -0.05-0.02i },
-                       { -0.03-0.02i,  0.01+0.00i,  0.00+0.03i, -0.02+0.07i,  0.07+0.02i,  0.01+0.01i },
-                       { -0.05+0.07i,  0.00-0.03i,  0.06+0.00i,  0.15+0.04i,  0.06-0.14i,  0.03-0.02i },
-                       { -0.07+0.21i, -0.02-0.07i,  0.15-0.04i,  0.41+0.00i,  0.04-0.39i,  0.06-0.07i },
-                       { -0.21-0.05i,  0.07-0.02i,  0.06+0.14i,  0.04+0.39i,  0.38+0.00i,  0.07+0.05i },
-                       { -0.05+0.02i,  0.01-0.01i,  0.03+0.02i,  0.06+0.07i,  0.07-0.05i,  0.02+0.00i } };
-			Ms[14] = { {  0.10+0.00i, -0.01-0.01i, -0.22+0.08i, -0.04-0.02i,  0.06-0.15i,  0.03+0.07i },
-                       { -0.01+0.01i,  0.00+0.00i,  0.02-0.02i,  0.00-0.00i,  0.00+0.02i, -0.01-0.01i },
-                       { -0.22-0.08i,  0.02+0.02i,  0.56+0.00i,  0.07+0.07i, -0.27+0.28i,  0.00-0.18i },
-                       { -0.04+0.02i,  0.00+0.00i,  0.07-0.07i,  0.02+0.00i,  0.00+0.07i, -0.02-0.02i },
-                       {  0.06+0.15i,  0.00-0.02i, -0.27-0.28i,  0.00-0.07i,  0.27+0.00i, -0.09+0.09i },
-                       {  0.03-0.07i, -0.01+0.01i,  0.00+0.18i, -0.02+0.02i, -0.09-0.09i,  0.06+0.00i } };
-			Ms[15] = { {  0.02+0.00i,  0.01-0.03i, -0.00+0.00i, -0.04+0.01i,  0.02-0.03i, -0.04-0.11i },
-                       {  0.01+0.03i,  0.07+0.00i, -0.01-0.00i, -0.05-0.07i,  0.06+0.02i,  0.18-0.14i },
-                       { -0.00-0.00i, -0.01+0.00i,  0.00+0.00i,  0.01+0.00i, -0.01+0.00i, -0.01+0.02i },
-                       { -0.04-0.01i, -0.05+0.07i,  0.01-0.00i,  0.10+0.00i, -0.06+0.04i,  0.00+0.28i },
-                       {  0.02+0.03i,  0.06-0.02i, -0.01-0.00i, -0.06-0.04i,  0.06+0.00i,  0.12-0.17i },
-                       { -0.04+0.11i,  0.18+0.14i, -0.01-0.02i,  0.00-0.28i,  0.12+0.17i,  0.76+0.00i } };
-			Ms[16] = { {  0.08+0.00i,  0.03+0.10i, -0.10-0.00i,  0.14+0.11i, -0.06+0.09i,  0.01-0.08i },
-                       {  0.03-0.10i,  0.13+0.00i, -0.04+0.13i,  0.20-0.13i,  0.08+0.11i, -0.10-0.05i },
-                       { -0.10+0.00i, -0.04-0.13i,  0.14+0.00i, -0.19-0.15i,  0.08-0.12i, -0.01+0.11i },
-                       {  0.14-0.11i,  0.20+0.13i, -0.19+0.15i,  0.42+0.00i,  0.01+0.25i, -0.10-0.16i },
-                       { -0.06-0.09i,  0.08-0.11i,  0.08+0.12i,  0.01-0.25i,  0.14+0.00i, -0.10+0.05i },
-                       {  0.01+0.08i, -0.10+0.05i, -0.01-0.11i, -0.10+0.16i, -0.10-0.05i,  0.09+0.00i } };
-			Ms[17] = { {  0.61+0.00i,  0.20+0.04i,  0.36-0.05i, -0.05+0.10i,  0.15-0.04i,  0.00+0.16i },
-                       {  0.20-0.04i,  0.07+0.00i,  0.12-0.04i, -0.01+0.04i,  0.05-0.02i,  0.01+0.05i },
-                       {  0.36+0.05i,  0.12+0.04i,  0.22+0.00i, -0.04+0.06i,  0.09-0.01i, -0.01+0.09i },
-                       { -0.05-0.10i, -0.01-0.04i, -0.04-0.06i,  0.02+0.00i, -0.02-0.02i,  0.03-0.01i },
-                       {  0.15+0.04i,  0.05+0.02i,  0.09+0.01i, -0.02+0.02i,  0.04+0.00i, -0.01+0.04i },
-                       {  0.00-0.16i,  0.01-0.05i, -0.01-0.09i,  0.03+0.01i, -0.01-0.04i,  0.04+0.00i } };
-			Ms[18] = { {  0.27+0.00i,  0.01-0.14i, -0.11-0.03i,  0.06+0.26i,  0.25+0.11i, -0.09-0.10i },
-                       {  0.01+0.14i,  0.08+0.00i,  0.01-0.06i, -0.13+0.04i, -0.05+0.14i,  0.05-0.05i },
-                       { -0.11+0.03i,  0.01+0.06i,  0.05+0.00i, -0.06-0.10i, -0.12-0.02i,  0.05+0.03i },
-                       {  0.06-0.26i, -0.13-0.04i, -0.06+0.10i,  0.26+0.00i,  0.16-0.22i, -0.11+0.07i },
-                       {  0.25-0.11i, -0.05-0.14i, -0.12+0.02i,  0.16+0.22i,  0.28+0.00i, -0.12-0.05i },
-                       { -0.09+0.10i,  0.05+0.05i,  0.05-0.03i, -0.11-0.07i, -0.12+0.05i,  0.06+0.00i } };
-			Ms[19] = { {  0.00+0.00i, -0.01+0.01i,  0.01+0.01i,  0.00-0.01i,  0.00+0.02i, -0.02+0.00i },
-                       { -0.01-0.01i,  0.14+0.00i, -0.03-0.10i, -0.08+0.07i,  0.12-0.18i,  0.19+0.13i },
-                       {  0.01-0.01i, -0.03+0.10i,  0.07+0.00i, -0.04-0.07i,  0.10+0.11i, -0.13+0.10i },
-                       {  0.00+0.01i, -0.08-0.07i, -0.04+0.07i,  0.08+0.00i, -0.16+0.03i, -0.03-0.17i },
-                       {  0.00-0.02i,  0.12+0.18i,  0.10-0.11i, -0.16-0.03i,  0.33+0.00i, -0.01+0.35i },
-                       { -0.02-0.00i,  0.19-0.13i, -0.13-0.10i, -0.03+0.17i, -0.01-0.35i,  0.38+0.00i } };
-			Ms[20] = { {  0.29+0.00i, -0.06+0.22i, -0.02+0.01i, -0.21+0.06i, -0.17-0.23i, -0.15-0.02i },
-                       { -0.06-0.22i,  0.17+0.00i,  0.01+0.01i,  0.09+0.15i, -0.14+0.17i,  0.01+0.12i },
-                       { -0.02-0.01i,  0.01-0.01i,  0.00+0.00i,  0.02+0.00i,  0.00+0.02i,  0.01+0.01i },
-                       { -0.21-0.06i,  0.09-0.15i,  0.02-0.00i,  0.17+0.00i,  0.07+0.20i,  0.10+0.05i },
-                       { -0.17+0.23i, -0.14-0.17i,  0.00-0.02i,  0.07-0.20i,  0.28+0.00i,  0.10-0.11i },
-                       { -0.15+0.02i,  0.01-0.12i,  0.01-0.01i,  0.10-0.05i,  0.10+0.11i,  0.08+0.00i } };
-			Ms[21] = { {  0.32+0.00i,  0.10-0.15i, -0.02+0.22i, -0.00-0.28i, -0.05+0.08i,  0.17+0.14i },
-                       {  0.10+0.15i,  0.10+0.00i, -0.11+0.06i,  0.13-0.09i, -0.05+0.00i, -0.01+0.12i },
-                       { -0.02-0.22i, -0.11-0.06i,  0.15+0.00i, -0.19+0.02i,  0.06+0.03i,  0.09-0.13i },
-                       { -0.00+0.28i,  0.13+0.09i, -0.19-0.02i,  0.24+0.00i, -0.07-0.04i, -0.12+0.15i },
-                       { -0.05-0.08i, -0.05-0.00i,  0.06-0.03i, -0.07+0.04i,  0.03+0.00i,  0.01-0.07i },
-                       {  0.17-0.14i, -0.01-0.12i,  0.09+0.13i, -0.12-0.15i,  0.01+0.07i,  0.16+0.00i } };
-			Ms[22] = { {  0.11+0.00i, -0.07+0.11i,  0.11-0.17i,  0.15-0.02i, -0.03+0.04i,  0.12-0.02i },
-                       { -0.07-0.11i,  0.15+0.00i, -0.24+0.01i, -0.12-0.13i,  0.06-0.00i, -0.11-0.11i },
-                       {  0.11+0.17i, -0.24-0.01i,  0.36+0.00i,  0.17+0.22i, -0.08-0.00i,  0.15+0.17i },
-                       {  0.15+0.02i, -0.12+0.13i,  0.17-0.22i,  0.21+0.00i, -0.04+0.05i,  0.17-0.01i },
-                       { -0.03-0.04i,  0.06+0.00i, -0.08+0.00i, -0.04-0.05i,  0.02+0.00i, -0.04-0.04i },
-                       {  0.12+0.02i, -0.11+0.11i,  0.15-0.17i,  0.17+0.01i, -0.04+0.04i,  0.15+0.00i } };
-			Ms[23] = { {  0.01+0.00i,  0.03-0.04i,  0.04-0.03i,  0.00-0.02i, -0.01-0.02i, -0.04-0.00i },
-                       {  0.03+0.04i,  0.35+0.00i,  0.35+0.08i,  0.11-0.04i,  0.07-0.13i, -0.13-0.22i },
-                       {  0.04+0.03i,  0.35-0.08i,  0.36+0.00i,  0.10-0.07i,  0.04-0.14i, -0.17-0.19i },
-                       {  0.00+0.02i,  0.11+0.04i,  0.10+0.07i,  0.04+0.00i,  0.04-0.03i, -0.01-0.08i },
-                       { -0.01+0.02i,  0.07+0.13i,  0.04+0.14i,  0.04+0.03i,  0.06+0.00i,  0.06-0.09i },
-                       { -0.04+0.00i, -0.13+0.22i, -0.17+0.19i, -0.01+0.08i,  0.06+0.09i,  0.18+0.00i } };
-
-		} else {
-			std::cerr << "Don't have a nearby point for this problem" << std::endl;
-			return 0;
-
-		}
-
-		// Put these in the B diagonals
-		for (int i=0; i<numBMats; i++) {
-			int matLoc = (numRhoMats+i)*2*d;
-			for (int j=0; j<d; j++) {
-				for (int k=0; k<d; k++) {
-					XDense(matLoc+j, matLoc+k) = std::real(Ms[i][j][k]);
-					XDense(matLoc+d+j, matLoc+d+k) = std::real(Ms[i][j][k]);
-					XDense(matLoc+j, matLoc+d+k) = std::imag(Ms[i][j][k]);
-					XDense(matLoc+d+j, matLoc+k) = -std::imag(Ms[i][j][k]);
-				}
-			}
-		}
-
-		// Calculate the ideal rho
-		double rtd = std::sqrt(d);
-		int rhoLoc = 0;
-		for (int i=0; i<numMeasureB; i++) {
-			for (int j=i+1; j<numMeasureB; j++) {
-				for (int k=0; k<numOutcomeB; k++) {
-					for (int l=0; l<numOutcomeB; l++) {
-						int loc1 = (numRhoMats + i*numOutcomeB + k)*d*2;
-						int loc2 = (numRhoMats + j*numOutcomeB + l)*d*2;
-						Eigen::MatrixXd B1Real = XDense.block(loc1, loc1, d, d);
-						Eigen::MatrixXd B1Imag = XDense.block(loc1+d, loc1, d, d);
-						Eigen::MatrixXd B2Real = XDense.block(loc2, loc2, d, d);
-						Eigen::MatrixXd B2Imag = XDense.block(loc2+d, loc2, d, d);
-						Eigen::MatrixXd newRhoReal = B1Real + B2Real + rtd*(B1Real*B2Real + B2Real*B1Real - B1Imag*B2Imag - B2Imag*B1Imag);
-						Eigen::MatrixXd newRhoImag = B1Imag + B2Imag + rtd*(B1Imag*B2Real + B2Real*B1Imag + B2Imag*B1Real + B1Real*B2Imag);
-						double scaleFactor = newRhoReal.trace();
-						XDense.block(rhoLoc, rhoLoc, d, d) = newRhoReal / scaleFactor;
-						XDense.block(rhoLoc+d, rhoLoc+d, d, d) = newRhoReal / scaleFactor;
-						XDense.block(rhoLoc+d, rhoLoc, d, d) = newRhoImag / scaleFactor;
-						XDense.block(rhoLoc, rhoLoc+d, d, d) = -newRhoImag / scaleFactor;
-						rhoLoc += 2*d;
-					}
-				}
-			}
-		}
-
-		// Then this X into an x
-		x = matToVec(XDense.sparseView(), 0);
-
-	} 
-
-	//x(0) *= 1.1;
-	//x(7) *= 1.1;
-	//x(9) *= 1.1;
+	std::cout << "here" << std::endl;
 	
-	// TODO
-	std::cout << "initial f(x) = " << f(x)/fScaling << " <= " << maxVal << std::endl;
-	std::cout << "initial g1(x) = " << g(x)(0)/gScaling << std::endl;
-	std::cout << "initial |g2(x)| = " << (g(x).tail(m-1)/gScaling).norm() << std::endl;
-
 	// Gradient descent to make sure we start with an interior point
 	Eigen::VectorXd v = Eigen::VectorXd::Zero(n);
 	for (int i=0; i<100000000; i++) {
@@ -1259,67 +1044,37 @@ int main(int argc, char ** argv) {
 		}
 	}
 
+	std::cout << "here" << std::endl;
+	
 	// Get the full matrices from this
 	X = vecToMat(x);
 	XDense = Eigen::MatrixXd(X);
 
-	// TODO
-	std::cout << "after f(x) = " << f(x)/fScaling << " <= " << maxVal << std::endl;
-	std::cout << "after g(x) = " << g(x)/gScaling << std::endl;
-
+	std::cout << "here" << std::endl;
+	
 	// Output the initial X
-	if (outputMode == "") {
-		std::cout << "" << std::endl;
-		std::cout << "--------------------------------" << std::endl;
-		std::cout << "        Initial Matrices        " << std::endl;;
-		std::cout << "--------------------------------" << std::endl;
-		Eigen::MatrixXd M(d, d);
-		for (int i=0; i<numMats; i++) {
-			int ind = i*d;
-			M = Eigen::MatrixXd(XDense.block(ind, ind, d, d));
-			std::cout << std::endl;
-			prettyPrint("mat " + std::to_string(i) + " = ", M);
-			std::cout << std::endl;
-			std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
-			std::cout << "tr(M^2-M)  = " << (M.adjoint()*M - M).trace() << std::endl;
-			std::cout << "is M PD? = " << isPD(M) << std::endl;
-		}
-	}
-	std::cout << "" << std::endl;
-
-	// Initialise Z TODO
-	//ZDense = Eigen::MatrixXd::Zero(p, p);
-	//ZDense = Eigen::MatrixXd::Identity(p, p);
-	ZDense = XDense;
-	//for (int i=0; i<numMeasureB; i++) {
-		//for (int j=0; j<numOutcomeB; j++) {
-			//int currentLoc = (i*numOutcomeB + j) * d;
-			//int copyLoc = (i*numOutcomeB + ((j+1) % numOutcomeB)) * d;
-			//ZDense.block(currentLoc,currentLoc,d,d) = XDense.block(copyLoc,copyLoc,d,d);
-			//ZDense.block(currentLoc+halfP,currentLoc+halfP,d,d) = XDense.block(copyLoc,copyLoc,d,d);
-			//ZDense.block(currentLoc+halfP,currentLoc,d,d) = XDense.block(copyLoc+halfP,copyLoc,d,d);
-			//ZDense.block(currentLoc,currentLoc+halfP,d,d) = -X.block(copyLoc+halfP,copyLoc,d,d);
-		//}
-	//}
-	Z = ZDense.sparseView();
-
-	// Output the initial Z
 	//if (outputMode == "") {
 		//std::cout << "" << std::endl;
 		//std::cout << "--------------------------------" << std::endl;
-		//std::cout << "      Initial Z " << std::endl;;
+		//std::cout << "        Initial Matrices        " << std::endl;;
 		//std::cout << "--------------------------------" << std::endl;
-		//for (int i=0; i<numMeasureB; i++) {
-			//for (int j=0; j<numOutcomeB; j++) {
-				//int ind = (i*numOutcomeB + j)*d;
-				//Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
-				//std::cout << std::endl;
-				//prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
-			//}
+		//Eigen::MatrixXd M(d, d);
+		//for (int i=0; i<numMats; i++) {
+			//int ind = i*d;
+			//M = Eigen::MatrixXd(XDense.block(ind, ind, d, d));
+			//std::cout << std::endl;
+			//prettyPrint("mat " + std::to_string(i) + " = ", M);
+			//std::cout << std::endl;
+			//std::cout << "|M^2-M|  = " << (M.adjoint()*M - M).squaredNorm() << std::endl;
+			//std::cout << "tr(M^2-M)  = " << (M.adjoint()*M - M).trace() << std::endl;
+			//std::cout << "is M PD? = " << isPD(M) << std::endl;
 		//}
-		//std::cout << std::endl;
-		//prettyPrint("X dot Z = ", X.cwiseProduct(Z).sum());
 	//}
+	//std::cout << "" << std::endl;
+
+	// Initialise Z
+	ZDense = Eigen::MatrixXd::Identity(p, p);
+	Z = ZDense.sparseView();
 
 	// Init some thing that are used for the first calcs
 	Eigen::SparseMatrix<double> XInverse = XDense.inverse().sparseView();
@@ -1330,6 +1085,8 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd delLCached = delL(y, Z, delfCached, A_0);
 	double rMagZero = rMag(0, Z, X, delLCached, gCached);
 
+	std::cout << "here" << std::endl;
+	
 	// Used for the BFGS update
 	Eigen::VectorXd prevx = x;
 	Eigen::MatrixXd prevA_0 = A_0;
@@ -1345,6 +1102,8 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd deltay = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd deltaZ = Eigen::MatrixXd::Zero(p, p);
 
+	std::cout << "here" << std::endl;
+	
 	// If using the BFGS update
 	if (useBFGS) {
 
@@ -1356,15 +1115,17 @@ int main(int argc, char ** argv) {
 
 	}
 
+	std::cout << "here" << std::endl;
+	
 	// Outer loop
 	double rMagMu = 0;
 	int k = 0;
 	int totalInner = 0;
 	for (k=0; k<maxOuterIter; k++) {
 
-		// Check if global convergence is reached TODO
+		// Check if global convergence is reached
 		rMagZero = rMag(0, Z, X, delLCached, gCached);
-		if (std::abs(f(x) - dual(y, Z)) < epsilon) {
+		if (rMagZero < epsilon) {
 			break;
 		}
 
@@ -1408,15 +1169,15 @@ int main(int argc, char ** argv) {
 			delLCached = delL(y, Z, delfCached, A_0);
 
 			// If not doing BFGS, need to do a full re-calc of G
-			//if (!useBFGS || gCached.norm() > BFGSmaxG) {
+			if (!useBFGS || gCached.norm() > BFGSmaxG) {
 
 				// Update G
 				G = del2L(x, y);
 
 				// Ensure it's positive definite
-				//makePD(G);
+				makePD(G);
 
-			//}
+			}
 
 			// Construct H
 			for (int j=0; j<n; j++) {
@@ -1463,7 +1224,7 @@ int main(int argc, char ** argv) {
 			}
 			double alphaBar = std::min(std::min(alphaBarX, alphaBarZ), 1.0);
 
-			// Calculate optimal step size using a line search TODO y >= 0?
+			// Calculate optimal step size using a line search 
 			double alpha;
 			int l;
 			double FCached = F(x, Z, mu);
@@ -1478,8 +1239,7 @@ int main(int argc, char ** argv) {
 			// Inner-iteration output
 			rMagMu = rMag(mu, Z, X, delLCached, gCached);
 			if (outputMode == "") {
-				//std::cout << std::scientific << "f=" << f(x) << " r=" << rMagMu  << " g=" << gCached.norm() << std::endl;
-				std::cout << std::scientific << "f=" << f(x) << " U=" << dual(y, Z) << " r=" << rMagMu  << " g=" << gCached.norm() << std::endl;
+				std::cout << std::scientific << "f=" << f(x) << " r=" << rMagMu  << " g=" << gCached.norm() << std::endl;
 			}
 
 			// Check if local convergence is reached
@@ -1488,26 +1248,11 @@ int main(int argc, char ** argv) {
 			}
 
 			// Save certain quantities for the BFGS update
-			//if (useBFGS) {
-				//prevx = x;
-				//prevDelfCached = delfCached;
-				//prevA_0 = A_0;
-			//}
-
-			// TODO
-			//std::cout << "alpha = " << alpha << std::endl;
-			//std::cout << std::endl;
-			//prettyPrint("x = ", x);
-			//std::cout << std::endl;
-			//prettyPrint("deltax = ", deltax);
-			//std::cout << std::endl;
-			//prettyPrint("y = ", y);
-			//std::cout << std::endl;
-			//prettyPrint("deltay = ", deltay);
-			//std::cout << std::endl;
-			//prettyPrint("Z = ", y);
-			//std::cout << std::endl;
-			//prettyPrint("deltaZ = ", deltaZ);
+			if (useBFGS) {
+				prevx = x;
+				prevDelfCached = delfCached;
+				prevA_0 = A_0;
+			}
 
 			// Update variables
 			x += alpha*deltax;
@@ -1515,23 +1260,23 @@ int main(int argc, char ** argv) {
 			Z += (alpha*deltaZ).sparseView();
 			
 			// If using a BFGS update
-			//if (useBFGS) {
+			if (useBFGS) {
 
-				//// Update certain quantities
-				//A_0 = delg(x);
-				//delfCached = delf(x);
+				// Update certain quantities
+				A_0 = delg(x);
+				delfCached = delf(x);
 
-				//// Update G
-				//Eigen::VectorXd s = x - prevx;
-				//Eigen::VectorXd q = delL(y, Z, delfCached, A_0) - delL(y, Z, prevDelfCached, prevA_0);
-				//double psi = 1;
-				//if ((s.transpose()*q).real()(0) < (0.2*s.transpose()*G*s).real()(0)) {
-					//psi = ((0.8*s.transpose()*G*s) / (s.transpose()*(G*s - q))).real()(0);
-				//}
-				//Eigen::VectorXd qBar = psi*q + (1-psi)*(G*s);
-				//G = G - ((G*(s*(s.transpose()*G))) / (s.transpose()*G*s)) + ((qBar*qBar.transpose()) / (s.transpose()*qBar));
+				// Update G
+				Eigen::VectorXd s = x - prevx;
+				Eigen::VectorXd q = delL(y, Z, delfCached, A_0) - delL(y, Z, prevDelfCached, prevA_0);
+				double psi = 1;
+				if ((s.transpose()*q).real()(0) < (0.2*s.transpose()*G*s).real()(0)) {
+					psi = ((0.8*s.transpose()*G*s) / (s.transpose()*(G*s - q))).real()(0);
+				}
+				Eigen::VectorXd qBar = psi*q + (1-psi)*(G*s);
+				G = G - ((G*(s*(s.transpose()*G))) / (s.transpose()*G*s)) + ((qBar*qBar.transpose()) / (s.transpose()*qBar));
 
-			//}
+			}
 			
 		}
 
@@ -1548,7 +1293,7 @@ int main(int argc, char ** argv) {
 	// Stop the timer
 	auto t2 = std::chrono::high_resolution_clock::now();
 
-	// Output the final y TODO
+	// Output the final y
 	std::cout << "" << std::endl;
 	std::cout << "--------------------------------" << std::endl;
 	std::cout << "      Final y " << std::endl;;
@@ -1593,7 +1338,6 @@ int main(int argc, char ** argv) {
 		std::cout << "----------------------------------" << std::endl;
 		std::cout << "        |r(w)| = " << rMagZero << " < " << epsilon << std::endl;;
 		std::cout << "         -f(x) = " << -f(x)/fScaling << " <= " << maxVal << std::endl;;
-		std::cout << "         -dual = " << -dual(y, Z) << std::endl;;
 		std::cout << "        |g(x)| = " << gCached.norm() << std::endl;;
 		std::cout << "         -L(w) = " << -L(x, X, y, Z) << std::endl;;
 		std::cout << "         <X,Z> = " << X.cwiseProduct(Z).sum() << std::endl;;
