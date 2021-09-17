@@ -21,6 +21,7 @@ using namespace std::complex_literals;
 #include <Eigen/Sparse>
 #include <Eigen/../unsupported/Eigen/KroneckerProduct>
 #include <Eigen/../unsupported/Eigen/MatrixFunctions>
+#include <Eigen/QR>
 
 // Defining the MUB problem
 int d = 2;
@@ -39,7 +40,7 @@ bool useBFGS = false;
 double BFGSmaxG = 1e-10;
 double fScaling = 1.00;
 double gScaling = 0.05;
-double derivDelta = 1e-15;
+double derivDelta = 1e-10;
 
 // Parameters between 0 and 1
 double gammaVal = 0.9;
@@ -203,6 +204,11 @@ void prettyPrint(std::string pre, Eigen::SparseMatrix<type> arr) {
 
 }
 
+// Pretty print a double
+void prettyPrint(std::string pre, double val) {
+	std::cout << pre << val << std::endl;
+}
+
 // Calculate a "norm" for a 3D "matrix"
 double norm3D(std::vector<Eigen::MatrixXd> M) {
 	double val = 0;
@@ -234,21 +240,21 @@ Eigen::SparseMatrix<double> vecToMat(Eigen::VectorXd x, double extra=extraDiag) 
 
 }
 
-// Calculate the pseudo-inverse of a matrix TODO
+// Calculate the pseudo-inverse of a matrix
 Eigen::SparseMatrix<double> pseudo(Eigen::SparseMatrix<double> M) {
-	return Eigen::MatrixXd(M).inverse().sparseView();
+	return Eigen::MatrixXd(M).completeOrthogonalDecomposition().pseudoInverse().sparseView();
 }
 
-// Objective function CHANGE TODO
+// Objective function CHANGE
 double f(Eigen::VectorXd x) {
 
 	// Extract the vars from the x
 	double lambda = x(0);
-	Eigen::VectorXd y = x.segment(1, 1+numy);
+	Eigen::VectorXd y = x.segment(1, numy);
 	Eigen::VectorXd z = x.tail(numz);
 
 	// Calculate and return the object function
-	return 0.5*(y.transpose()*C-z.transpose())*pseudo(Q + lambda*identityQ)*(C.transpose()*y-z) + lambda*numMats - y.transpose()*b;
+	return 0.5*(y.transpose()*C-z.transpose())*pseudo(Q + lambda*identityQ)*(C.transpose()*y-z) + lambda*numMats + y.transpose()*b;
 
 }
 
@@ -312,6 +318,14 @@ Eigen::MatrixXd del2f(Eigen::VectorXd x) {
 	return returnMat;
 
 }
+
+// Print the size (rows then cols) of a matrix
+void printSize(Eigen::MatrixXd M) {
+	std::cout << M.rows() << " x " << M.cols() << std::endl;
+}
+void printSize(Eigen::SparseMatrix<double> M) {
+	std::cout << M.rows() << " x " << M.cols() << std::endl;
+}
 				
 // Constraint function CHANGE
 Eigen::VectorXd g(Eigen::VectorXd x) {
@@ -321,19 +335,15 @@ Eigen::VectorXd g(Eigen::VectorXd x) {
 
 	// Extract the vars from the x
 	double lambda = x(0);
-	Eigen::VectorXd y = x.segment(1, 1+numy);
+	Eigen::VectorXd y = x.segment(1, numy);
 	Eigen::VectorXd z = x.tail(numz);
 
 	// Calculate P
 	Eigen::MatrixXd W = Eigen::MatrixXd(Q.transpose()) + lambda*Eigen::MatrixXd(identityQ);
 	Eigen::MatrixXd P = W*((W.transpose()*W).inverse())*W.transpose();
 
-	std::cout << "here2" << std::endl; // TODO
-
 	// This is only zero if the (y^TC-z^T) is in the row space of Q
-	returnVec(0) = (P*(y.transpose()*C-z.transpose())-y.transpose()*C+z.transpose()).norm();
-
-	std::cout << "here3" << std::endl;
+	returnVec(0) = (P*(C.transpose()*y-z)-C.transpose()*y+z).norm();
 
 	// Return the vector of constraints
 	return returnVec;
@@ -411,7 +421,7 @@ Eigen::VectorXd delL(Eigen::VectorXd y, Eigen::SparseMatrix<double> Z, Eigen::Ve
 	// Calculate A* Z
 	Eigen::VectorXd AStarZ = Eigen::VectorXd::Zero(n);
 	for (int i=0; i<n; i++) {
-		AStarZ(i) = As[i].cwiseProduct(Z).sum();
+		AStarZ(i) = Ds[i].cwiseProduct(Z).sum();
 	}
 
 	// Return this vector
@@ -984,7 +994,7 @@ int main(int argc, char ** argv) {
 
 	}
 
-	// The last part is for z TODO
+	// The last part is for z
 	for (int i=0; i<ogn; i++) {
 
 		// For each D
@@ -1011,7 +1021,7 @@ int main(int argc, char ** argv) {
 	std::vector<Eigen::Triplet<double>> tripsE;
 
 	// Top left element is the lowest eigenvalue of Q
-	tripsE.push_back(Eigen::Triplet<double>(0, 0, -Eigen::MatrixXd(Q).eigenvalues().real().minCoeff()));
+	tripsE.push_back(Eigen::Triplet<double>(0, 0, Eigen::MatrixXd(Q).eigenvalues().real().minCoeff()));
 
 	// Construct this sparse matrix
 	E.setFromTriplets(tripsE.begin(), tripsE.end());
@@ -1022,12 +1032,19 @@ int main(int argc, char ** argv) {
 	Eigen::MatrixXd XDense = Eigen::MatrixXd::Zero(p, p);
 
 	// The dual vars (and alt forms)
-	Eigen::VectorXd y = Eigen::VectorXd::Zero(m);
+	Eigen::VectorXd y = Eigen::VectorXd::Random(m);
 	Eigen::SparseMatrix<double> Z(p, p);
 	Eigen::MatrixXd ZDense = Eigen::MatrixXd::Zero(p, p);
 
-	std::cout << "here" << std::endl;
-	
+	// Seed so it's random each time
+	if (initMode == "random") {
+		srand((unsigned int) time(0));
+	}
+
+	// Init x TODO
+	x = Eigen::VectorXd::Random(n);
+	x(0) = 1.2;
+
 	// Gradient descent to make sure we start with an interior point
 	Eigen::VectorXd v = Eigen::VectorXd::Zero(n);
 	for (int i=0; i<100000000; i++) {
@@ -1044,14 +1061,12 @@ int main(int argc, char ** argv) {
 		}
 	}
 
-	std::cout << "here" << std::endl;
-	
+	prettyPrint("after x = ", x);
+
 	// Get the full matrices from this
 	X = vecToMat(x);
 	XDense = Eigen::MatrixXd(X);
 
-	std::cout << "here" << std::endl;
-	
 	// Output the initial X
 	//if (outputMode == "") {
 		//std::cout << "" << std::endl;
@@ -1073,7 +1088,7 @@ int main(int argc, char ** argv) {
 	//std::cout << "" << std::endl;
 
 	// Initialise Z
-	ZDense = Eigen::MatrixXd::Identity(p, p);
+	ZDense = Eigen::MatrixXd::Zero(p, p);
 	Z = ZDense.sparseView();
 
 	// Init some thing that are used for the first calcs
@@ -1085,8 +1100,6 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd delLCached = delL(y, Z, delfCached, A_0);
 	double rMagZero = rMag(0, Z, X, delLCached, gCached);
 
-	std::cout << "here" << std::endl;
-	
 	// Used for the BFGS update
 	Eigen::VectorXd prevx = x;
 	Eigen::MatrixXd prevA_0 = A_0;
@@ -1102,8 +1115,6 @@ int main(int argc, char ** argv) {
 	Eigen::VectorXd deltay = Eigen::VectorXd::Zero(m);
 	Eigen::MatrixXd deltaZ = Eigen::MatrixXd::Zero(p, p);
 
-	std::cout << "here" << std::endl;
-	
 	// If using the BFGS update
 	if (useBFGS) {
 
@@ -1115,8 +1126,6 @@ int main(int argc, char ** argv) {
 
 	}
 
-	std::cout << "here" << std::endl;
-	
 	// Outer loop
 	double rMagMu = 0;
 	int k = 0;
@@ -1181,16 +1190,16 @@ int main(int argc, char ** argv) {
 
 			// Construct H
 			for (int j=0; j<n; j++) {
-				Eigen::SparseMatrix<double> cached = XInverse*As[j]*Z;
+				Eigen::SparseMatrix<double> cached = XInverse*Ds[j]*Z;
 				for (int i=0; i<n; i++) {
-					H(i,j) = As[i].cwiseProduct(cached).sum();
+					H(i,j) = Ds[i].cwiseProduct(cached).sum();
 				}
 			}
 
 			// Calculate/cache a few useful matrices
 			GHInverse = (G + H).inverse();
 			for (int i=0; i<n; i++) {
-				AStarXInverse(i) = As[i].cwiseProduct(XInverse).sum();
+				AStarXInverse(i) = Ds[i].cwiseProduct(XInverse).sum();
 			}
 
 			// Calculate the x and y by solving system of linear equations
@@ -1239,7 +1248,7 @@ int main(int argc, char ** argv) {
 			// Inner-iteration output
 			rMagMu = rMag(mu, Z, X, delLCached, gCached);
 			if (outputMode == "") {
-				std::cout << std::scientific << "f=" << f(x) << " r=" << rMagMu  << " g=" << gCached.norm() << std::endl;
+				std::cout << std::scientific << "f=" << f(x) << " r=" << rMagMu  << " g=" << gCached.norm() << " lam=" << x(0) << std::endl;
 			}
 
 			// Check if local convergence is reached
@@ -1294,41 +1303,44 @@ int main(int argc, char ** argv) {
 	auto t2 = std::chrono::high_resolution_clock::now();
 
 	// Output the final y
-	std::cout << "" << std::endl;
-	std::cout << "--------------------------------" << std::endl;
-	std::cout << "      Final y " << std::endl;;
-	std::cout << "--------------------------------" << std::endl;
-	prettyPrint("y = ", y);
+	//std::cout << "" << std::endl;
+	//std::cout << "--------------------------------" << std::endl;
+	//std::cout << "      Final y " << std::endl;;
+	//std::cout << "--------------------------------" << std::endl;
+	//prettyPrint("y = ", y);
 	
 	// Output the final Z
-	if (outputMode == "") {
-		std::cout << "" << std::endl;
-		std::cout << "--------------------------------" << std::endl;
-		std::cout << "      Final Z " << std::endl;;
-		std::cout << "--------------------------------" << std::endl;
-		for (int i=0; i<numMats; i++) {
-			int ind = i*d;
-			Eigen::MatrixXcd M = Eigen::MatrixXcd(Z.block(ind, ind, d, d)) + Eigen::MatrixXcd(1i*Z.block(ind+d, ind, d, d));
-			std::cout << std::endl;
-			prettyPrint("Z_" + std::to_string(i) + " = ", M);
-		}
-	}
+	//if (outputMode == "") {
+		//std::cout << "" << std::endl;
+		//std::cout << "--------------------------------" << std::endl;
+		//std::cout << "      Final Z " << std::endl;;
+		//std::cout << "--------------------------------" << std::endl;
+		//for (int i=0; i<numMats; i++) {
+			//int ind = i*d;
+			//Eigen::MatrixXcd M = Eigen::MatrixXcd(Z.block(ind, ind, d, d)) + Eigen::MatrixXcd(1i*Z.block(ind+d, ind, d, d));
+			//std::cout << std::endl;
+			//prettyPrint("Z_" + std::to_string(i) + " = ", M);
+		//}
+	//}
 
 	// Extract the solution from X
-	if (outputMode == "") {
-		std::cout << "" << std::endl;
-		std::cout << "----------------------------------" << std::endl;
-		std::cout << "         Final Matrices " << std::endl;;
-		std::cout << "----------------------------------" << std::endl;
-		X = vecToMat(x, 0);
-		Eigen::MatrixXcd B(d, d);
-		for (int i=0; i<numMats; i++) {
-			int ind = i*2*d;
-			B = Eigen::MatrixXcd(X.block(ind, ind, d, d)) + 1i*Eigen::MatrixXcd(X.block(ind+d, ind, d, d));
-			std::cout << std::endl;
-			prettyPrint("B_" + std::to_string(i) + " = ", B);
-		}
-	}
+	//if (outputMode == "") {
+		//std::cout << "" << std::endl;
+		//std::cout << "----------------------------------" << std::endl;
+		//std::cout << "         Final Matrices " << std::endl;;
+		//std::cout << "----------------------------------" << std::endl;
+		//X = vecToMat(x, 0);
+		//Eigen::MatrixXcd B(d, d);
+		//for (int i=0; i<numMats; i++) {
+			//int ind = i*2*d;
+			//B = Eigen::MatrixXcd(X.block(ind, ind, d, d)) + 1i*Eigen::MatrixXcd(X.block(ind+d, ind, d, d));
+			//std::cout << std::endl;
+			//prettyPrint("B_" + std::to_string(i) + " = ", B);
+		//}
+	//}
+
+	// TODO
+	prettyPrint("final x = ", x);
 
 	// Final output
 	if (outputMode == "") {
@@ -1337,9 +1349,9 @@ int main(int argc, char ** argv) {
 		std::cout << "         Final Output " << std::endl;;
 		std::cout << "----------------------------------" << std::endl;
 		std::cout << "        |r(w)| = " << rMagZero << " < " << epsilon << std::endl;;
-		std::cout << "         -f(x) = " << -f(x)/fScaling << " <= " << maxVal << std::endl;;
+		std::cout << "          f(x) = " << f(x)/fScaling << " >= " << maxVal << std::endl;;
 		std::cout << "        |g(x)| = " << gCached.norm() << std::endl;;
-		std::cout << "         -L(w) = " << -L(x, X, y, Z) << std::endl;;
+		std::cout << "          L(w) = " << L(x, X, y, Z) << std::endl;;
 		std::cout << "         <X,Z> = " << X.cwiseProduct(Z).sum() << std::endl;;
 		std::cout << "           |y| = " << y.norm() << std::endl;;
 		std::cout << "      y^T*g(x) = " << y.transpose()*g(x) << std::endl;;
