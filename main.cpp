@@ -29,30 +29,30 @@ int sets = 2;
 std::string initMode = "fixed";
 
 // Optimisation parameters
-double extraDiag = 1.0;
+double extraDiag = 1e-5;
 long int maxOuterIter =  1000000000;
 long int maxInnerIter =  1000000000;
 long int maxTotalInner = 1000000000;
 double muScaling = 10;
 double gThresh = 1e-5;
 int numCores = 1;
-bool useBFGS = false;
-double BFGSmaxG = 1e-10;
+bool useBFGS = true;
+double BFGSmaxG = 10;
 double fScaling = 1.00;
 double gScaling = 0.05;
 double derivDelta = 1e-10;
 
 // Parameters between 0 and 1
-double gammaVal = 0.9;
+double gammaVal = 0.1;
 double epsilonZero = 0.9;
 double beta = 0.1;
 
 // Parameters greater than 0
 double epsilon = 1e-5; 
-double M_c = 1;
+double M_c = 1e10;
 double mu = 1.0;
-double nu = 0.9;
-double rho = 0.5;
+double nu = 0.1;
+double rho = 0.1;
 
 // Useful quantities to define later
 int numPerm = 0;
@@ -218,8 +218,27 @@ double norm3D(std::vector<Eigen::MatrixXd> M) {
 	return val;
 }
 
+// Function turning X to x
+Eigen::VectorXd matToVec(Eigen::SparseMatrix<double> X, double extra=extraDiag) {
+
+	// Remove any extra from the diag
+	Eigen::SparseMatrix<double> XNoDiag = X - identityp*extra - E;
+
+	// Create a blank n vector
+	Eigen::VectorXd newVec(n);
+
+	// Extract each element
+	for (int i=0; i<n; i++) {
+		newVec(i) = XNoDiag.cwiseProduct(Ds[i]).sum()/2;
+	}
+
+	// Return this new vector
+	return newVec;
+
+}
+
 // Function turning x to X
-Eigen::SparseMatrix<double> vecToMat(Eigen::VectorXd x, double extra=extraDiag) {
+Eigen::SparseMatrix<double> vecToMat(Eigen::VectorXd x, double extra=extraDiag, bool noE=false) {
 
 	// Create a blank p by p matrix
 	Eigen::SparseMatrix<double> newMat(p, p);
@@ -230,7 +249,9 @@ Eigen::SparseMatrix<double> vecToMat(Eigen::VectorXd x, double extra=extraDiag) 
 	}
 
 	// Add the E matrix
-	newMat += E;
+	if (!noE) {
+		newMat += E;
+	}
 
 	// Add an extra diagonal so it always has an inverse
 	newMat += identityp*extra;
@@ -245,7 +266,7 @@ Eigen::SparseMatrix<double> pseudo(Eigen::SparseMatrix<double> M) {
 	return Eigen::MatrixXd(M).completeOrthogonalDecomposition().pseudoInverse().sparseView();
 }
 
-// Objective function CHANGE
+// Objective function CHANGE TODO check
 double f(Eigen::VectorXd x) {
 
 	// Extract the vars from the x
@@ -484,7 +505,7 @@ double F(Eigen::VectorXd x, Eigen::SparseMatrix<double> Z, double mu) {
 double deltaF(Eigen::MatrixXd deltaZ, Eigen::SparseMatrix<double> ZInverse, Eigen::SparseMatrix<double> Z, Eigen::SparseMatrix<double> X, Eigen::SparseMatrix<double> XInverse, Eigen::VectorXd delfCached, Eigen::VectorXd gCached, Eigen::MatrixXd A_0, Eigen::VectorXd deltax) {
 
 	// Calculate the deltaX matrix
-	Eigen::MatrixXd deltaX = vecToMat(deltax, 0);
+	Eigen::MatrixXd deltaX = vecToMat(deltax, 0, true);
 
 	// Calculate the two components
 	double FBP = std::real(delfCached.dot(deltax) - mu*(XInverse*deltaX).trace() + rho*((gCached+A_0*deltax).norm()-gCached.norm()));
@@ -572,6 +593,7 @@ int main(int argc, char ** argv) {
 			std::cout << " -T [dbl]         set the threshold for the initial g(x)" << std::endl;
 			std::cout << "                        " << std::endl;
 			std::cout << "    parameter options          " << std::endl;
+			std::cout << " -H [dbl]         set delta for numerical differentiation" << std::endl;
 			std::cout << " -S [dbl]         set max g(x) for BFGS" << std::endl;
 			std::cout << " -e [dbl]         set epsilon" << std::endl;
 			std::cout << " -M [dbl]         set M_c" << std::endl;
@@ -607,6 +629,11 @@ int main(int argc, char ** argv) {
 		// Set the f(x) scaling
 		} else if (arg == "-F") {
 			fScaling = std::stod(argv[i+1]);
+			i += 1;
+
+		// Set the delta for numerical diff
+		} else if (arg == "-H") {
+			derivDelta = std::stod(argv[i+1]);
 			i += 1;
 
 		// Set the g(x) scaling
@@ -1032,7 +1059,7 @@ int main(int argc, char ** argv) {
 	Eigen::MatrixXd XDense = Eigen::MatrixXd::Zero(p, p);
 
 	// The dual vars (and alt forms)
-	Eigen::VectorXd y = Eigen::VectorXd::Random(m);
+	Eigen::VectorXd y = Eigen::VectorXd::Zero(m);
 	Eigen::SparseMatrix<double> Z(p, p);
 	Eigen::MatrixXd ZDense = Eigen::MatrixXd::Zero(p, p);
 
@@ -1041,9 +1068,28 @@ int main(int argc, char ** argv) {
 		srand((unsigned int) time(0));
 	}
 
-	// Init x TODO
-	x = Eigen::VectorXd::Random(n);
-	x(0) = 1.2;
+	// Create X from vectors so it's deffo PSD
+	for (int i=1; i<p; i+=2*d) {
+		Eigen::VectorXcd rand = Eigen::VectorXcd::Random(d);
+		Eigen::MatrixXcd tempMat = rand * rand.adjoint();
+		XDense.block(i, i, d, d) = tempMat.real();
+		XDense.block(i+d, i+d, d, d) = tempMat.real();
+		XDense.block(i+d, i, d, d) = tempMat.imag();
+		XDense.block(i, i+d, d, d) = tempMat.imag();
+	}
+
+	// Then turn this into an x
+	XDense(0,0) = 2;
+	X = XDense.sparseView();
+	x = matToVec(X);
+	x(0) = 2;
+
+	// TODO 
+	prettyPrint("x = ", x);
+	prettyPrint("XDense = ", X);
+	prettyPrint("X = ", X);
+	std::cout << "is PSD = " << isPSD(X) << std::endl;
+	std::cout << "is PSD = " << isPSD(XDense) << std::endl;
 
 	// Gradient descent to make sure we start with an interior point
 	Eigen::VectorXd v = Eigen::VectorXd::Zero(n);
@@ -1119,7 +1165,8 @@ int main(int argc, char ** argv) {
 	if (useBFGS) {
 
 		// Only calculate the full Hessian once, use a BFGS-like update later
-		G = del2L(x, y);
+		//G = del2L(x, y); // TODO
+		G = Eigen::MatrixXd::Identity(n, n);
 
 		// Ensure it's positive definite
 		makePD(G);
@@ -1216,7 +1263,7 @@ int main(int argc, char ** argv) {
 			deltay = solution.tail(m);
 
 			// Then calculate the Z
-			deltaX = vecToMat(deltax, 0);
+			deltaX = vecToMat(deltax, 0, true);
 			deltaZ = mu*XInverse - Z - 0.5*(XInverse*deltaX*Z + Z*deltaX*XInverse);
 
 			// Determine the max l such that beta^l = 1e-9
@@ -1248,7 +1295,7 @@ int main(int argc, char ** argv) {
 			// Inner-iteration output
 			rMagMu = rMag(mu, Z, X, delLCached, gCached);
 			if (outputMode == "") {
-				std::cout << std::scientific << "f=" << f(x) << " r=" << rMagMu  << " g=" << gCached.norm() << " lam=" << x(0) << std::endl;
+				std::cout << std::scientific << "f=" << f(x) << " r=" << rMagMu  << " g=" << gCached.norm() << " lam=" << x(0) << " PSD=" << isPSD(X) << std::endl;
 			}
 
 			// Check if local convergence is reached
@@ -1340,6 +1387,7 @@ int main(int argc, char ** argv) {
 	//}
 
 	// TODO
+	prettyPrint("final X = ", X);
 	prettyPrint("final x = ", x);
 
 	// Final output
