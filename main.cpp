@@ -275,7 +275,7 @@ double f(Eigen::VectorXd x) {
 	Eigen::VectorXd z = x.tail(numz);
 
 	// Calculate and return the object function
-	return 0.5*(y.transpose()*C-z.transpose())*pseudo(Q + lambda*identityQ)*(C.transpose()*y-z) + lambda*numMats + y.transpose()*b;
+	return fScaling*0.5*(y.transpose()*C-z.transpose())*pseudo(Q + lambda*identityQ)*(C.transpose()*y-z) + lambda*numMats + y.transpose()*b;
 
 }
 
@@ -364,7 +364,7 @@ Eigen::VectorXd g(Eigen::VectorXd x) {
 	Eigen::MatrixXd P = W*((W.transpose()*W).inverse())*W.transpose();
 
 	// This is only zero if the (y^TC-z^T) is in the row space of Q
-	returnVec(0) = (P*(C.transpose()*y-z)-C.transpose()*y+z).norm();
+	returnVec(0) = gScaling*(P*(C.transpose()*y-z)-C.transpose()*y+z).norm();
 
 	// Return the vector of constraints
 	return returnVec;
@@ -998,9 +998,7 @@ int main(int argc, char ** argv) {
 		std::vector<Eigen::Triplet<double>> tripsD;
 
 		// Identity in the top left
-		for (int j=0; j<ogn; j++) {
-			tripsD.push_back(Eigen::Triplet<double>(j, j, 1));
-		}
+		tripsD.push_back(Eigen::Triplet<double>(0, 0, 1));
 
 		// Construct this sparse matrix
 		D.setFromTriplets(tripsD.begin(), tripsD.end());
@@ -1295,7 +1293,7 @@ int main(int argc, char ** argv) {
 			// Inner-iteration output
 			rMagMu = rMag(mu, Z, X, delLCached, gCached);
 			if (outputMode == "") {
-				std::cout << std::scientific << "f=" << f(x) << " r=" << rMagMu  << " g=" << gCached.norm() << " lam=" << x(0) << " PSD=" << isPSD(X) << std::endl;
+				std::cout << std::scientific << "f=" << f(x) << " r=" << rMagMu  << " g=" << gCached.norm() << " lam=" << x(0) << std::endl;
 			}
 
 			// Check if local convergence is reached
@@ -1386,8 +1384,12 @@ int main(int argc, char ** argv) {
 		//}
 	//}
 
+	for (int i=0; i<Ds.size(); i++) {
+		prettyPrint("D = ", Ds[i]);
+	}
+
 	// TODO
-	prettyPrint("final X = ", X);
+	prettyPrint("final X = ", vecToMat(x));
 	prettyPrint("final x = ", x);
 
 	// Final output
@@ -1397,7 +1399,7 @@ int main(int argc, char ** argv) {
 		std::cout << "         Final Output " << std::endl;;
 		std::cout << "----------------------------------" << std::endl;
 		std::cout << "        |r(w)| = " << rMagZero << " < " << epsilon << std::endl;;
-		std::cout << "          f(x) = " << f(x)/fScaling << " >= " << maxVal << std::endl;;
+		std::cout << "          f(x) = " << f(x) << " >= " << maxVal << std::endl;;
 		std::cout << "        |g(x)| = " << gCached.norm() << std::endl;;
 		std::cout << "          L(w) = " << L(x, X, y, Z) << std::endl;;
 		std::cout << "         <X,Z> = " << X.cwiseProduct(Z).sum() << std::endl;;
