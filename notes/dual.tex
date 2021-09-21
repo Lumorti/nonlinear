@@ -35,7 +35,7 @@ if it is possible to have MUBs in that dimension $d$ and number of bases $n$.  T
 The Lagrangian for this primal can be written as follows, with Lagrange multipliers for the various constraints:
 
 \begin{align}
-	L(x, y, \lambda, z) &= x^T Q x - y^T (b-Cx) - \lambda (x^T x - N) - z^T x \\ 
+	L(x, y, \lambda, z) &= x^T Q x - y^T (b-Cx) - \lambda (N - x^T x) - z^T x \\ 
 						&= x^T ( Q + \lambda I) x + (y^TC - z^T) x - \lambda N - y^T b
 \end{align}
 
@@ -50,27 +50,27 @@ We now consider the three possible cases for the dual, where $R(M)$ represents t
 \item $Q+\lambda I \not\succeq 0$:
 	\begin{align}
 		\implies &\exists x : ~ x^T (Q + \lambda I) x < 0 \\
-				 &\text{and} ~~ (y^TC-z^T)x \le 0 \\
+				 &\text{and} ~~ (C^Ty-z)x \le 0 \\
 		&\therefore ~ x \to n x \implies U(y, \lambda, z) \to -\infty
 	\end{align}
-\item $Q+\lambda I \succeq 0$ and $y^TC-z^T \not \in R(Q+\lambda I)$:
+\item $Q+\lambda I \succeq 0$ and $C^Ty-z \not \in R(Q+\lambda I)$:
 	\begin{align}
 		\implies &\exists x : ~ x^T (Q + \lambda I) x = 0 \\
-				 &\text{and} ~~ (y^TC-z^T)x < 0 \\
+				 &\text{and} ~~ (C^Ty-z)x < 0 \\
 		&\therefore ~ x \to n x \implies U(y, \lambda, z) \to -\infty
 	\end{align}
-\item $Q+\lambda I \succeq 0$ and $y^TC-z^T \in R(Q+\lambda I)$:
+\item $Q+\lambda I \succeq 0$ and $C^Ty-z \in R(Q+\lambda I)$:
 	\begin{align}
 		\implies &\exists x : ~ x^T (Q + \lambda I) x = 0 \\
-				 &\text{and} ~~ (y^TC-z^T)x = 0 \\
+				 &\text{and} ~~ (C^Ty-z)x = 0 \\
 				 &\therefore ~ x \to n x \implies U(y, \lambda, z) > -\infty
 	\end{align}
 \end{itemize}
 
-Thus for this dual to be bounded the third set of conditions must be true, which is a known form for this problem, giving the simplified dual, where $M^\dagger$ represents the pseudo-inverse for some $M$:
+Thus for this dual to be bounded the third set of conditions must be true, which is a known form for this problem, giving the simplified dual, where $M^+$ represents the pseudo-inverse for some $M$:
 
 \begin{align}
-	\text{max}_{y, \lambda, z} ~ -&\frac{1}{2} (y^T C - z^T) (Q+\lambda I)^\dagger (C^Ty - z) - \lambda N - y^T b \\ 
+	\text{max}_{y, \lambda, z} ~ -&\frac{1}{2} (y^T C - z^T) (Q+\lambda I)^+ (C^Ty - z) - \lambda N - y^T b \\ 
 	\text{s.t.} ~~ &\sum_i A_i z_i \succeq 0 \\
 				&Q+ \lambda I \succeq 0 \\
 				&y^TC-z^T \in R(Q+\lambda I)
@@ -81,7 +81,7 @@ Thus for this dual to be bounded the third set of conditions must be true, which
 This is then a non-linear convex optimisation problem, which can be simplified as follows:
 
 \begin{align}
-	\text{min}_{y, \lambda, z} ~ &\frac{1}{2} (y^T C - z^T) (Q+\lambda I)^\dagger (C^Ty - z) + \lambda N + y^T b \\ 
+	\text{min}_{y, \lambda, z} ~ &\frac{1}{2} (y^T C - z^T) (Q+\lambda I)^+ (C^Ty - z) + \lambda N + y^T b \\ 
 	\text{s.t.} ~~ &\begin{pmatrix} Q+ \lambda I & 0 \\ 0 & \sum_i A_i z_i \end{pmatrix} \succeq 0 \\
 			    &|P(y^TC-z^T)-y^T C+z^T| = 0 \\ 
 				\text{where} ~~ &P = W (W^T W)^{-1} W^T \\
@@ -91,7 +91,7 @@ This is then a non-linear convex optimisation problem, which can be simplified a
 Converting this into a form containing only a singular variable:
 
 \begin{align}
-	\text{min}_{w} ~ &\frac{1}{2} (w_y^T C - w_z^T) (Q+w_\lambda I)^\dagger (C^Tw_y - w_z) + w_\lambda N + w_y^T b \\ 
+	\text{min}_{w} ~ &\frac{1}{2} (w_y^T C - w_z^T) (Q+w_\lambda I)^+ (C^Tw_y - w_z) + w_\lambda N + w_y^T b \\ 
 	\text{s.t.} ~~ &\sum_i D_i w_i + E \succeq 0 \\
 			    &|P(w_y^TC-w_z^T)-w_y^T C+w_z^T| = 0 \\ 
 				\\

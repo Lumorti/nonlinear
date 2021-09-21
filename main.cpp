@@ -39,17 +39,17 @@ int numCores = 1;
 bool useBFGS = true;
 double BFGSmaxG = 10;
 double fScaling = 1.00;
-double gScaling = 0.05;
-double derivDelta = 1e-10;
+double gScaling = 0.10;
+double derivDelta = 1e-5;
 
 // Parameters between 0 and 1
-double gammaVal = 0.1;
+double gammaVal = 0.9;
 double epsilonZero = 0.9;
-double beta = 0.1;
+double beta = 0.9;
 
 // Parameters greater than 0
 double epsilon = 1e-5; 
-double M_c = 1e10;
+double M_c = 1;
 double mu = 1.0;
 double nu = 0.1;
 double rho = 0.1;
@@ -825,7 +825,7 @@ int main(int argc, char ** argv) {
 	// The "ideal" value
 	double maxVal = d*d*numPerm*(1+1/std::sqrt(d));
 
-	// Calculate the Q matrix defining the objective CHANGE
+	// Calculate the Q matrix defining the objective CHANGE TODO
 	Q = Eigen::SparseMatrix<double>(ogn, ogn);
 	std::vector<Eigen::Triplet<double>> tripsQ;
 
@@ -842,14 +842,18 @@ int main(int argc, char ** argv) {
 
 					// Loop over the real elements per vector section
 					for (int m=0; m<numRealPer; m++) {
+						//tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc1+m, 1.0));
+						//tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc2+m, 1.0));
 						tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc1+m, 0.5));
 						tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc2+m, 0.5));
 						tripsQ.push_back(Eigen::Triplet<double>(horizLoc1+m, vertLoc+m, 0.5));
 						tripsQ.push_back(Eigen::Triplet<double>(horizLoc2+m, vertLoc+m, 0.5));
 					}
 
-					// Loop over the real elements per vector section
+					// Loop over the imag elements per vector section
 					for (int m=numRealPer; m<numUniquePer; m++) {
+						//tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc1+m, -1.0));
+						//tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc2+m, -1.0));
 						tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc1+m, -0.5));
 						tripsQ.push_back(Eigen::Triplet<double>(vertLoc+m, horizLoc2+m, -0.5));
 						tripsQ.push_back(Eigen::Triplet<double>(horizLoc1+m, vertLoc+m, -0.5));
@@ -866,6 +870,9 @@ int main(int argc, char ** argv) {
 
 	// Construct Q from these triplets
 	Q.setFromTriplets(tripsQ.begin(), tripsQ.end());
+
+	// Take the negative, since we want the primal to be min x^TQx
+	Q = -Q;
 
 	// Calculate the C matrix defining the normalisation constraints CHANGE
 	C = Eigen::SparseMatrix<double>(ogm-1, ogn);
@@ -1057,9 +1064,9 @@ int main(int argc, char ** argv) {
 	Eigen::MatrixXd XDense = Eigen::MatrixXd::Zero(p, p);
 
 	// The dual vars (and alt forms)
-	Eigen::VectorXd y = Eigen::VectorXd::Zero(m);
-	Eigen::SparseMatrix<double> Z(p, p);
-	Eigen::MatrixXd ZDense = Eigen::MatrixXd::Zero(p, p);
+	Eigen::VectorXd y = Eigen::VectorXd::Random(m);
+	Eigen::MatrixXd ZDense = Eigen::MatrixXd::Random(p, p);
+	Eigen::SparseMatrix<double> Z = ZDense.sparseView();
 
 	// Seed so it's random each time
 	if (initMode == "random") {
@@ -1081,6 +1088,7 @@ int main(int argc, char ** argv) {
 	X = XDense.sparseView();
 	x = matToVec(X);
 	x(0) = 2;
+	x.segment(1, numy) = Eigen::VectorXd::Random(numy);
 
 	// TODO 
 	prettyPrint("x = ", x);
@@ -1163,7 +1171,7 @@ int main(int argc, char ** argv) {
 	if (useBFGS) {
 
 		// Only calculate the full Hessian once, use a BFGS-like update later
-		//G = del2L(x, y); // TODO
+		//G = del2L(x, y);
 		G = Eigen::MatrixXd::Identity(n, n);
 
 		// Ensure it's positive definite
@@ -1384,11 +1392,73 @@ int main(int argc, char ** argv) {
 		//}
 	//}
 
-	for (int i=0; i<Ds.size(); i++) {
-		prettyPrint("D = ", Ds[i]);
-	}
+	// TODO check the Q C and b for the ideal primal x
+	//std::vector<Eigen::MatrixXcd> Rs(4);
+	//std::vector<std::vector<std::vector<std::complex<double>>>> Bs(4);
+	//Bs[0] = { { 1.0, 0.0 }, 
+			  //{ 0.0, 0.0 } };
+	//Bs[1] = { { 0.0, 0.0 }, 
+			  //{ 0.0, 1.0 } };
+	//Bs[2] = { { 0.5, 0.5 }, 
+			  //{ 0.5, 0.5 } };
+	//Bs[3] = { { 0.5,-0.5 }, 
+			  //{-0.5, 0.5 } };
+	//int rhoNum = 0;
+	//double rtd = std::sqrt(d);
+	//for (int i=0; i<numMeasureB; i++) {
+		//for (int j=i+1; j<numMeasureB; j++) {
+			//for (int k=0; k<numOutcomeB; k++) {
+				//for (int l=0; l<numOutcomeB; l++) {
+					//Eigen::MatrixXcd B1(d,d);
+					//Eigen::MatrixXcd B2(d,d);
+					//for (int i1=0; i1<d; i1++) {
+						//for (int i2=0; i2<d; i2++) {
+							//B1(i1,i2) = Bs[i*numOutcomeB+k][i1][i2];
+							//B2(i1,i2) = Bs[j*numOutcomeB+l][i1][i2];
+						//}
+					//}
+					//Rs[rhoNum] = B1 + B2 + rtd*(B1*B2 + B2*B1);
+					//Rs[rhoNum] = Rs[rhoNum] / Rs[rhoNum].trace();
+					//rhoNum++;
+				//}
+			//}
+		//}
+	//}
+	//Eigen::VectorXd primalx(numz);
+	//for (int i=0; i<numRhoMats; i++) {
+		//primalx(i*4+0) = Rs[i].real()(0, 0);
+		//primalx(i*4+1) = rt2*Rs[i].real()(0, 1);
+		//primalx(i*4+2) = Rs[i].real()(1, 1);
+		//primalx(i*4+3) = rt2*Rs[i].imag()(0, 1);
+	//}
+	//for (int i=0; i<numBMats; i++) {
+		//primalx(numRhoMats*4+i*4+0) = std::real(Bs[i][0][0]);
+		//primalx(numRhoMats*4+i*4+1) = rt2*std::real(Bs[i][0][1]);
+		//primalx(numRhoMats*4+i*4+2) = std::real(Bs[i][1][1]);
+		//primalx(numRhoMats*4+i*4+3) = rt2*std::imag(Bs[i][0][1]);
+	//}
+
+	//prettyPrint("primal x = ", primalx);
+	//Eigen::MatrixXd primalX = Eigen::MatrixXd::Zero(2*numMats*d, 2*numMats*d);
+	//std::cout << numz << " " << As.size() << " " << ogn << std::endl;
+	//for (int i=0; i<As.size(); i++) {
+		//primalX += As[i]*primalx(i);
+	//}
+	//prettyPrint("primal X = ", primalX);
+	//prettyPrint("Q = ", Q);
+	//prettyPrint("xQx = ", primalx.transpose()*(Q*primalx));
+	//prettyPrint("Cx-b = ", (C*primalx-b).norm());
 
 	// TODO
+	double templ = x(0);
+	Eigen::VectorXd tempy = x.segment(1, numy);
+	Eigen::VectorXd tempz = x.tail(numz);
+	Eigen::VectorXd temp1 = C.transpose()*tempy;
+	Eigen::VectorXd temp2 = C.transpose()*tempy - tempz;
+	Eigen::VectorXd temp3 = 0.5*(tempy.transpose()*C-tempz.transpose())*pseudo(Q + templ*identityQ)*(C.transpose()*tempy-tempz);
+	prettyPrint("C^T y = ", temp1);
+	prettyPrint("C^T y - z = ", temp2);
+	prettyPrint("first term = ", temp3);
 	prettyPrint("final X = ", vecToMat(x));
 	prettyPrint("final x = ", x);
 
@@ -1408,9 +1478,6 @@ int main(int argc, char ** argv) {
 		std::cout << "     |delf(x)| = " << delfCached.norm() << std::endl;;
 		std::cout << "     |delL(w)| = " << delLCached.norm() << std::endl;;
 		std::cout << "     |delg(x)| = " << A_0.norm() << std::endl;;
-		std::cout << "    |del2f(x)| = " << del2f(x).norm() << std::endl;;
-		std::cout << "    |del2L(w)| = " << G.norm() << std::endl;;
-		std::cout << "    |del2g(x)| = " << norm3D(del2g(x)) << std::endl;;
 		std::cout << "   total inner = " << totalInner << std::endl;;
 		std::cout << "    time taken = " << std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count() << " ms" << std::endl;
 
