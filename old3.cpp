@@ -39,7 +39,7 @@ int numCores = 1;
 bool useBFGS = true;
 double BFGSmaxG = 10;
 double fScaling = 1.00;
-double gScaling = 0.01;
+double gScaling = 0.10;
 double derivDelta = 1e-5;
 
 // Parameters between 0 and 1
@@ -284,22 +284,17 @@ Eigen::VectorXd delf(Eigen::VectorXd x) {
 
 	// Create an empty vector
 	Eigen::VectorXd returnVec(n);
+	Eigen::VectorXd xPlus = x;
+	Eigen::VectorXd xMinus = x;
 
-	// Extract the vars from the x
-	double lambda = x(0);
-	Eigen::VectorXd y = x.segment(1, numy);
-	Eigen::VectorXd z = x.tail(numz);
-
-	// Calculate some useful matrices
-	Eigen::SparseMatrix<double> W = Q + lambda*identityQ;
-	Eigen::SparseMatrix<double> WPlus = pseudo(W);
-	Eigen::VectorXd Cyz = C.transpose()*y-z;
-	Eigen::VectorXd N = Eigen::VectorXd::Constant(1, numMats);
-
-	// Each section has a slightly different derivative
-	returnVec.head(1) = -0.5*Cyz.transpose()*WPlus*WPlus*Cyz + N;
-	returnVec.segment(1, numy) = C*WPlus*Cyz + b;
-	returnVec.tail(numz) = -WPlus*Cyz;
+	// For the change in each element
+	for (int i=0; i<n; i++) {
+		xPlus(i) = x(i)+derivDelta;
+		xMinus(i) = x(i)-derivDelta;
+		returnVec(i) = (f(xPlus) - f(xMinus)) / (2*derivDelta);
+		xPlus(i) = x(i);
+		xMinus(i) = x(i);
+	}
 
 	// Return the derivate wrt each variable
 	return returnVec;
@@ -368,11 +363,13 @@ Eigen::VectorXd g(Eigen::VectorXd x) {
 	Eigen::MatrixXd W = Eigen::MatrixXd(Q.transpose()) + lambda*Eigen::MatrixXd(identityQ);
 	Eigen::MatrixXd P = W*((W.transpose()*W).inverse())*W.transpose();
 
+	// TODO what if just zero
 	// This is only zero if the (y^TC-z^T) is in the row space of Q 
-	returnVec(0) = (P*(C.transpose()*y-z)-C.transpose()*y+z).squaredNorm();
+	//returnVec(0) = gScaling*(P*(C.transpose()*y-z)-C.transpose()*y+z).norm();
+	returnVec(0) = 0;
 
 	// Return the vector of constraints
-	return gScaling*returnVec;
+	return returnVec;
 
 }
 
@@ -381,25 +378,20 @@ Eigen::MatrixXd delg(Eigen::VectorXd x) {
 
 	// Create an empty matrix
 	Eigen::MatrixXd returnMat(m, n);
+	Eigen::VectorXd xPlus = x;
+	Eigen::VectorXd xMinus = x;
 
-	// Extract the vars from the x
-	double lambda = x(0);
-	Eigen::VectorXd y = x.segment(1, numy);
-	Eigen::VectorXd z = x.tail(numz);
-
-	// Calculate some useful matrices
-	Eigen::SparseMatrix<double> W = Q + lambda*identityQ;
-	Eigen::SparseMatrix<double> WPlus = pseudo(W);
-	Eigen::VectorXd Cyz = C.transpose()*y-z;
-	Eigen::SparseMatrix<double> P = W*WPlus;
-
-	// Each section has a slightly different derivative TODO
-	returnMat(0,0) = ((WPlus-W*WPlus*WPlus)*Cyz).squaredNorm();
-	returnMat.row(0).segment(1, numy) = 2*(C*P.transpose()-C)*(P*Cyz-Cyz);
-	returnMat.row(0).tail(numz) = -2*P.transpose()*(P*Cyz-Cyz);
+	// For the change in each element
+	for (int i=0; i<n; i++) {
+		xPlus(i) = x(i)+derivDelta;
+		xMinus(i) = x(i)-derivDelta;
+		returnMat.col(i) = (g(xPlus) - g(xMinus)) / (2*derivDelta);
+		xPlus(i) = x(i);
+		xMinus(i) = x(i);
+	}
 
 	// Return the vector of constraints
-	return gScaling*returnMat;
+	return returnMat;
 
 }
 
@@ -835,7 +827,7 @@ int main(int argc, char ** argv) {
 	// The "ideal" value
 	double maxVal = d*d*numPerm*(1+1/std::sqrt(d));
 
-	// Calculate the Q matrix defining the objective CHANGE
+	// Calculate the Q matrix defining the objective CHANGE TODO
 	Q = Eigen::SparseMatrix<double>(ogn, ogn);
 	std::vector<Eigen::Triplet<double>> tripsQ;
 
@@ -1084,22 +1076,21 @@ int main(int argc, char ** argv) {
 		srand((unsigned int) time(0));
 	}
 
-	// Create X from vectors so it's deffo PSD TODO test g
+	// Create X from vectors so it's deffo PSD
 	for (int i=1; i<p; i+=2*d) {
-		//Eigen::VectorXcd rand = Eigen::VectorXcd::Random(d);
-		//Eigen::MatrixXcd tempMat = rand * rand.adjoint();
-		Eigen::MatrixXcd tempMat = Eigen::MatrixXcd::Random(d,d);
+		Eigen::VectorXcd rand = Eigen::VectorXcd::Random(d);
+		Eigen::MatrixXcd tempMat = rand * rand.adjoint();
 		XDense.block(i, i, d, d) = tempMat.real();
 		XDense.block(i+d, i+d, d, d) = tempMat.real();
 		XDense.block(i+d, i, d, d) = tempMat.imag();
-		XDense.block(i, i+d, d, d) = -tempMat.imag();
+		XDense.block(i, i+d, d, d) = tempMat.imag();
 	}
 
 	// Then turn this into an x
-	XDense(0,0) = 1;
+	XDense(0,0) = 2;
 	X = XDense.sparseView();
 	x = matToVec(X);
-	x(0) = 1;
+	x(0) = 2;
 	x.segment(1, numy) = Eigen::VectorXd::Random(numy);
 
 	// TODO 
@@ -1111,7 +1102,6 @@ int main(int argc, char ** argv) {
 
 	// Gradient descent to make sure we start with an interior point
 	Eigen::VectorXd v = Eigen::VectorXd::Zero(n);
-	std::cout << std::scientific;
 	for (int i=0; i<100000000; i++) {
 		v = g(x);
 		if (outputMode == "") {
@@ -1127,8 +1117,6 @@ int main(int argc, char ** argv) {
 	}
 
 	prettyPrint("after x = ", x);
-
-	return 0;
 
 	// Get the full matrices from this
 	X = vecToMat(x);

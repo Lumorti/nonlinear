@@ -73,7 +73,7 @@ Thus for this dual to be bounded the third set of conditions must be true, which
 	\text{max}_{y, \lambda, z} ~ -&\frac{1}{2} (y^T C - z^T) (Q+\lambda I)^+ (C^Ty - z) - \lambda N - y^T b \\ 
 	\text{s.t.} ~~ &\sum_i A_i z_i \succeq 0 \\
 				&Q+ \lambda I \succeq 0 \\
-				&y^TC-z^T \in R(Q+\lambda I)
+				&C^Ty-z \in R(Q+\lambda I)
 \end{align}
 
 \pagebreak 
@@ -83,7 +83,7 @@ This is then a non-linear convex optimisation problem, which can be simplified a
 \begin{align}
 	\text{min}_{y, \lambda, z} ~ &\frac{1}{2} (y^T C - z^T) (Q+\lambda I)^+ (C^Ty - z) + \lambda N + y^T b \\ 
 	\text{s.t.} ~~ &\begin{pmatrix} Q+ \lambda I & 0 \\ 0 & \sum_i A_i z_i \end{pmatrix} \succeq 0 \\
-			    &|P(y^TC-z^T)-y^T C+z^T| = 0 \\ 
+			    &|P(C^Ty-z)-C^Ty+z| = 0 \\ 
 				\text{where} ~~ &P = W (W^T W)^{-1} W^T \\
 								&W = Q+\lambda I
 \end{align}
@@ -93,13 +93,34 @@ Converting this into a form containing only a singular variable:
 \begin{align}
 	\text{min}_{w} ~ &\frac{1}{2} (w_y^T C - w_z^T) (Q+w_\lambda I)^+ (C^Tw_y - w_z) + w_\lambda N + w_y^T b \\ 
 	\text{s.t.} ~~ &\sum_i D_i w_i + E \succeq 0 \\
-			    &|P(w_y^TC-w_z^T)-w_y^T C+w_z^T| = 0 \\ 
+			    &|P(C^Tw_y-w_z)-C^T w_y+w_z|^2 = 0 \\ 
 				\\
 				\text{where} ~~ &w = \begin{pmatrix}\lambda \\ y \\ z \end{pmatrix} \\
 				&P = W (W^T W)^{-1} W^T \\
 								&W = Q+w_\lambda I \\
 								&D_{i_\lambda} = \begin{pmatrix}1 & 0 \\ 0 & 0 \end{pmatrix} ~~~ D_{i_y\le i<i_z} = \begin{pmatrix}0 & 0 \\ 0 & 0 \end{pmatrix} ~~~ D_{i_z \le i} = \begin{pmatrix}0 & 0 \\ 0 & A_i \end{pmatrix} \\
 								&E = \begin{pmatrix}\lambda_\text{min}(Q) & 0 \\ 0 & 0 \end{pmatrix} 
+\end{align}
+
+\pagebreak
+The first derivatives of the objective function $f(w)$:
+
+\begin{align}
+	f(w) &= \frac{1}{2} (w_y^T C - w_z^T) (Q+w_\lambda I)^+ (C^Tw_y - w_z) + w_\lambda N + w_y^T b \\ 
+		   \nabla f(w) &= \begin{pmatrix} \frac{\partial f(w)}{\partial w_\lambda} \\ \frac{\partial f(w)}{\partial w_y} \\ \frac{\partial f(w)}{\partial w_z} \end{pmatrix} \\
+		   \frac{\partial f(w)}{\partial w_\lambda} &= -\frac{1}{2} (w_y^T C - w_z^T) ((Q+w_\lambda I)^+)^2 (C^Tw_y - w_z) +N \\
+		   \frac{\partial f(w)}{\partial w_y} &= C (Q+w_\lambda I)^+ (C^Tw_y - w_z) + b \\
+		   \frac{\partial f(w)}{\partial w_z} &= - (Q+w_\lambda I)^+ (C^Tw_y - w_z)
+\end{align}
+
+The first derivatives of the equality constraint $g(w)$:
+
+\begin{align}
+	g(w) &= |P(C^Tw_y-w_z)-C^Tw_y+w_z|^2 \\
+	\nabla g(w) &= \begin{pmatrix} \frac{\partial g(w)}{\partial w_\lambda} \\ \frac{\partial g(w)}{\partial w_y} \\ \frac{\partial g(w)}{\partial w_z} \end{pmatrix} \\
+	\frac{\partial g(w)}{\partial w_\lambda} &= |((Q+w_\lambda I)^+-(Q+w_\lambda I)((Q+w_\lambda I)^+)^2)(C^Tw_y-w_z)|^2 \\
+		   \frac{\partial g(w)}{\partial w_y} &= (PC^T-C^T)^T (P(C^Tw_y-w_z)-w_y^T C+w_z) \\ &+ (P(C^Tw_y-w_z)-w_y^T C+w_z)^T (PC^T-C^T) \\
+		   \frac{\partial g(w)}{\partial w_z} &= (-P)^T (P(C^Tw_y-w_z)-w_y^T C+w_z) \\ &+ (P(C^Tw_y-w_z)-w_y^T C+w_z)^T (-P)
 \end{align}
 
 \end{document}
