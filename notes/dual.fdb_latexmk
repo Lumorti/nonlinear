@@ -1,5 +1,5 @@
 # Fdb version 3
-["pdflatex"] 1632396319 "dual.tex" "dual.pdf" "dual" 1632396320
+["pdflatex"] 1632396319 "dual.tex" "dual.pdf" "dual" 1632761644
   "/etc/texmf/web2c/texmf.cnf" 1624968890 475 c0e671620eb5563b2130f56340a5fde8 ""
   "/home/lmortimer/.texlive2019/texmf-var/fonts/pk/ljfour/jknappen/ec/tcrm1000.600pk" 1631635087 11524 e8404a2cfad0ddfad04951e29c3e664c ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/tcrm1000.tfm" 1136768653 1536 e07581a4bb3136ece9eeb4c3ffab8233 ""
@@ -38,6 +38,6 @@
   "dual.aux" 1632396320 8 a94a2480d3289e625eea47cd1b285758 "pdflatex"
   "dual.tex" 1632396290 5850 a3100c06c4220ec796a26cf33de6285b ""
   (generated)
+  "dual.pdf"
   "dual.log"
   "dual.aux"
-  "dual.pdf"
