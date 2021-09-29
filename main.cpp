@@ -14,6 +14,9 @@ using namespace std::complex_literals;
 #include <Eigen/../unsupported/Eigen/KroneckerProduct>
 #include <Eigen/../unsupported/Eigen/MatrixFunctions>
 
+// MOSEK
+#include "fusion.h"
+
 // For printing
 int precision = 4;
 
@@ -129,147 +132,237 @@ void prettyPrint(std::string pre, Eigen::SparseMatrix<type> arr) {
 
 // Pretty print a double
 void prettyPrint(std::string pre, double val) {
-	std::cout << std::scientific << pre << val << std::endl;
+	std::cout << std::scientific << std::setprecision(precision) << pre << val << std::endl;
 }
 // Standard cpp entry point
 int main(int argc, char ** argv) {
 
-	int n = 18;
-	int m = 6;
+	// Defining the problem
+	int s = 2;
+	int d = 2;
 
-	// Create A_i
+	// Useful quantities
+	int numPerm = sets*(sets-1)/2;
+	int numMeasureB = s;
+	int numOutcomeB = d;
+	int numRealPer = (d*(d+1))/2-1;
+	int numImagPer = (d*(d+1))/2-d;
+	int numUniquePer = numRealPer + numImagPer;
+	int numRhoMats = numPerm*numOutcomeB*numOutcomeB;
+	int numBMats = numMeasureB*(numOutcomeB-1);
+	int numMats = numRhoMats + numBMats;
+	int n = numMats*numUniquePer;
+	int m = 1 + numMats*(d*(d+1))/2;
+
+	// Inner bound from seesaw/Monte Carlo/KKT 
+	double innerBound = 0;
+	if (d == 2 && s == 2) {
+		innerBound = -6.82840;
+	}
+
+	// The value for MUBs
+	double criticalValue = -numPerm*d*d*(1+(1/std::sqrt(d)));
+
+	prettyPrint("n = ", n);
+	prettyPrint("n*n = ", n*n);
+	prettyPrint("m = ", m);
+
+	// The location in the vector of the i'th diagonal
+	Eigen::VectorXd diagLocs(d);
+	int nextDelta = d;
+	diagLocs(0) = 0;
+	for (int i=1; i<d; i++) {
+		diagLocs(i) = diagLocs(i-1) + nextDelta;
+		nextDelta -= 1;
+	}
+
+	// Create the vector of As
 	std::vector<Eigen::SparseMatrix<double>> A(1+m, Eigen::SparseMatrix<double>(n, n));
 
-	std::vector<Eigen::Triplet<double>> tripsA_0;
-	tripsA_0.push_back(Eigen::Triplet<double>(12, 0, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(13, 1, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(14, 2, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(0, 12, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(1, 13, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(2, 14, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(15, 0, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(16, 1, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(17, 2, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(0, 15, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(1, 16, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(2, 17, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(12, 3, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(13, 4, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(14, 5, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(3, 12, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(4, 13, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(5, 14, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(15, 3, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(16, 4, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(17, 5, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(3, 15, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(4, 16, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(5, 17, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(12, 6, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(13, 7, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(14, 8, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(6, 12, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(7, 13, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(8, 14, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(15, 6, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(16, 7, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(17, 8, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(6, 15, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(7, 16, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(8, 17, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(12, 9, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(13, 10, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(14, 11, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(9, 12, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(10, 13, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(11, 14, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(15, 9, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(16, 10, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(17, 11, 1));
-	tripsA_0.push_back(Eigen::Triplet<double>(9, 15, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(10, 16, -1));
-	tripsA_0.push_back(Eigen::Triplet<double>(11, 17, 1));
-	A[0].setFromTriplets(tripsA_0.begin(), tripsA_0.end());
-	A[0] = -A[0];
-
-	std::vector<Eigen::Triplet<double>> tripsA_1;
-	tripsA_1.push_back(Eigen::Triplet<double>(0, 0, 1));
-	tripsA_1.push_back(Eigen::Triplet<double>(1, 1, 1));
-	tripsA_1.push_back(Eigen::Triplet<double>(2, 2, 1));
-	A[1].setFromTriplets(tripsA_1.begin(), tripsA_1.end());
-
-	std::vector<Eigen::Triplet<double>> tripsA_2;
-	tripsA_2.push_back(Eigen::Triplet<double>(3, 3, 1));
-	tripsA_2.push_back(Eigen::Triplet<double>(4, 4, 1));
-	tripsA_2.push_back(Eigen::Triplet<double>(5, 5, 1));
-	A[2].setFromTriplets(tripsA_2.begin(), tripsA_2.end());
-
-	std::vector<Eigen::Triplet<double>> tripsA_3;
-	tripsA_3.push_back(Eigen::Triplet<double>(6, 6, 1));
-	tripsA_3.push_back(Eigen::Triplet<double>(7, 7, 1));
-	tripsA_3.push_back(Eigen::Triplet<double>(8, 8, 1));
-	A[3].setFromTriplets(tripsA_3.begin(), tripsA_3.end());
-
-	std::vector<Eigen::Triplet<double>> tripsA_4;
-	tripsA_4.push_back(Eigen::Triplet<double>(9, 9, 1));
-	tripsA_4.push_back(Eigen::Triplet<double>(10, 10, 1));
-	tripsA_4.push_back(Eigen::Triplet<double>(11, 11, 1));
-	A[4].setFromTriplets(tripsA_4.begin(), tripsA_4.end());
-
-	std::vector<Eigen::Triplet<double>> tripsA_5;
-	tripsA_5.push_back(Eigen::Triplet<double>(12, 12, 1));
-	tripsA_5.push_back(Eigen::Triplet<double>(13, 13, 1));
-	tripsA_5.push_back(Eigen::Triplet<double>(14, 14, 1));
-	A[5].setFromTriplets(tripsA_5.begin(), tripsA_5.end());
-
-	std::vector<Eigen::Triplet<double>> tripsA_6;
-	tripsA_6.push_back(Eigen::Triplet<double>(15, 15, 1));
-	tripsA_6.push_back(Eigen::Triplet<double>(16, 16, 1));
-	tripsA_6.push_back(Eigen::Triplet<double>(17, 17, 1));
-	A[6].setFromTriplets(tripsA_6.begin(), tripsA_6.end());
-
-	// Create b_i
+	// Create the vector of Bs
 	std::vector<Eigen::VectorXd> b(1+m, Eigen::VectorXd::Zero(n));
-	b[0](0) = 2;
-	b[0](9) = -2;
-	b[1](0) = -1;
-	b[2](3) = -1;
-	b[3](6) = -1;
-	b[4](9) = -1;
-	b[5](12) = -1;
-	b[6](15) = -1;
 
-	// Create c_i
+	// Create the cs
 	std::vector<double> c(1+m, 0.0);
-	c[0] = -4;
 
-	// Ideal should be -6.82840 for d2n2
+	// Create the objective matrix and vector
+	int rhoLoc = 0;
+	std::vector<Eigen::Triplet<double>> tripsA_0;
+	for (int i=0; i<numMeasureB; i++) {
+		for (int j=i+1; j<numMeasureB; j++) {
+			for (int k=0; k<numOutcomeB; k++) {
+				for (int l=0; l<numOutcomeB; l++) {
+
+					// The locations in the big matrix
+					int locBik = numRhoMats*numUniquePer+(i*numOutcomeB+k)*numUniquePer;
+					int locBjl = numRhoMats*numUniquePer+(i*numOutcomeB+k)*numUniquePer;
+
+					// rho * B^i_k
+					for (int a=0; a<numUniquePer; a++) {
+						tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, 2));
+						tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, 2));
+					}
+					for (int a=0; a<d-1; a++) {
+						for (int b=0; b<d-1; a++) {
+							if (a != b) {
+								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBik+diagLocs(b), 1));
+								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(b), locBik+diagLocs(a), 1));
+								tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locRho+diagLocs(b), 1));
+								tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(b), locRho+diagLocs(a), 1));
+							}
+						}
+					}
+					for (int a=0; a<d-1; a++) {
+						b[0](locRho+diagLocs(a)) = -1;
+						b[0](locBik+diagLocs(a)) = -1;
+					}
+					c[0] += 1;
+					
+					// rho * B^j_l
+					for (int a=0; a<numUniquePer; a++) {
+						tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, 2));
+						tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, 2));
+					}
+					for (int a=0; a<d-1; a++) {
+						for (int b=0; b<d-1; a++) {
+							if (a != b) {
+								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBjl+diagLocs(b), 1));
+								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(b), locBjl+diagLocs(a), 1));
+								tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(a), locRho+diagLocs(b), 1));
+								tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(b), locRho+diagLocs(a), 1));
+							}
+						}
+					}
+					for (int a=0; a<d-1; a++) {
+						b[0](locRho+diagLocs(a)) = -1;
+						b[0](locBjl+diagLocs(a)) = -1;
+					}
+					c[0] += 1;
+					rhoLoc += numUniquePer;
+
+				}
+
+				// rho * (B^i_k + (1-B^j_...)) TODO
+
+			}
+
+			// rho * (B^j_l + (1-B^i_...)) TODO
+
+		}
+	}
+	
+	// Create the matrix and flip it
+	A[0].setFromTriplets(tripsA_0.begin(), tripsA_0.end());
+	A[0] = -0.5*A[0];
+
+	// Create the constraint matrices and vectors TODO
+
+	// Turn the Eigen A matrices into MOSEK forms
+	std::vector<mosek::fusion::Matrix::t> AMosek(1+m);
+	for (int j=0; j<1+m; j++){
+
+		// Get the lists of locations and values
+		std::vector<int> nonZeroRows;
+		std::vector<int> nonZeroCols;
+		std::vector<double> nonZeroVals;
+		for (int i1=0; i1<A[j].outerSize(); ++i1){
+			for (Eigen::SparseMatrix<double>::InnerIterator it(A[j], i1); it; ++it){
+				nonZeroRows.push_back(it.row());
+				nonZeroCols.push_back(it.col());
+				nonZeroVals.push_back(it.value());
+			}
+		}
+
+		// Make the sparse matrix from this data
+		AMosek[j] = mosek::fusion::Matrix::sparse(n, n, monty::new_array_ptr(nonZeroRows), monty::new_array_ptr(nonZeroCols), monty::new_array_ptr(nonZeroVals));
+
+	}
+
+	// Turn the Eigen b vectors into MOSEK forms
+	std::vector<mosek::fusion::Matrix::t> bMosek(1+m);
+	for (int j=0; j<1+m; j++){
+
+		// Get the lists of values
+		std::vector<double> nonZeroVals(n);
+		for (int i1=0; i1<b[j].size(); i1++){
+			nonZeroVals[i1] = b[j](i1);
+		}
+
+		// Make the sparse matrix from this data
+		bMosek[j] = mosek::fusion::Matrix::dense(n, 1, monty::new_array_ptr(nonZeroVals));
+
+	}
+
+	// Create the MOSEK model
+	//mosek::fusion::Model::t model = new mosek::fusion::Model(); 
+	//auto _model = monty::finally([&](){model->dispose();});
+
+	//// The moment matrix to optimise
+	//auto dimX = monty::new_array_ptr(std::vector<int>({n, n}));
+	//mosek::fusion::Variable::t X = model->variable(dimX, mosek::fusion::Domain::inRange(-1.0, 1.0));
+	//mosek::fusion::Variable::t x = model->variable(n, mosek::fusion::Domain::inRange(-1.0, 1.0));
+
+	//// Set up the objective function 
+	//model->objective(mosek::fusion::ObjectiveSense::Minimize, mosek::fusion::Expr::add(mosek::fusion::Expr::dot(AMosek[0], X), mosek::fusion::Expr::dot(bMosek[0], x)));
+
+	//// X >= x^T x constraint
+	//model->constraint(
+					//mosek::fusion::Expr::vstack(
+						//mosek::fusion::Expr::hstack(X, x), 
+						//mosek::fusion::Expr::hstack(x->transpose(), 1)
+					//), 
+					//mosek::fusion::Domain::inPSDCone(n+1));
+
+	//// Projectivity constraints
+	//for (int i=1; i<m+1; i++){
+		//model->constraint(mosek::fusion::Expr::add(mosek::fusion::Expr::dot(AMosek[i], X), mosek::fusion::Expr::dot(bMosek[i], x)), mosek::fusion::Domain::equalsTo(0.0));
+	//}
+
+	//// Solve the problem
+	//model->solve();
+
+	//// Extract the results
+	//double outerBound = model->primalObjValue() + c[0];
+	//auto temp = *(x->level());
+	//auto temp2 = *(X->level());
+	//Eigen::VectorXd xOpt = Eigen::VectorXd::Zero(n);
+	//Eigen::MatrixXd XOpt = Eigen::MatrixXd::Zero(n, n);
+	//for (int i=0; i<n; i++){
+		//xOpt(i) = temp[i];
+	//}
+	//for (int i=0; i<n*n; i++){
+		//XOpt(i/n,i%n) = temp2[i];
+	//}
+
+	//// Ouput the final results
+	//double allowedDiff = std::pow(10, -precision);
+	//prettyPrint("      outer bound = ", outerBound);
+	//prettyPrint("known inner bound = ", innerBound);
+	//prettyPrint("   value for MUBs = ", criticalValue);
+	//if (outerBound > criticalValue + allowedDiff) {
+		//std::cout << "conclusion: there is no set of " << s << " MUBs in dimension " << d << std::endl;
+	//} else if (innerBound <= criticalValue + allowedDiff) {
+		//std::cout << "conclusion: there is a set of " << s << " MUBs in dimension " << d << std::endl;
+	//} else {
+		//std::cout << "conclusion: there might be a set of " << s << " MUBs in dimension " << d << std::endl;
+	//}
+		//std::cout << "            within an error of 1e-" << precision << "" << std::endl;
 
 	// Test with the ideal x TODO
-	Eigen::VectorXd x = Eigen::VectorXd::Zero(n);
-	//x << 0.8536,  0.3536, 0,
-		 //0.8536, -0.3536, 0,
-		 //0.1464,  0.3536, 0,
-		 //0.1464, -0.3536, 0,
-			  //1,       0, 0,
-			//0.5,     0.5, 0;
-	x << 1,  0, 0,
-		 1,  0, 0,
-		 0,  0, 0,
-		 0, 0, 0,
-		      1,       0, 0,
-		    1,     0, 0; // TODO this equals 6 as it should
-
-
+	xOpt << 0.8536,  0.3536, 0,
+		 0.8536, -0.3536, 0,
+		 0.1464,  0.3536, 0,
+		 0.1464, -0.3536, 0,
+			  1,       0, 0,
+			0.5,     0.5, 0;
 	prettyPrint("A_0 = ", A[0]);
-	prettyPrint("x = ", x);
-
-	double val = x.dot(A[0]*x) + b[0].dot(x) + c[0];
-	prettyPrint("obj = ", val);
-	prettyPrint("diff = ", val+6.82840);
+	prettyPrint("b_0 = ", b[0]);
+	prettyPrint("c_0 = ", c[0]);
+	prettyPrint("x = ", xOpt);
+	double obj = xOpt.dot(A[0]*xOpt) + b[0].dot(xOpt) + c[0];
 	for (int i=1; i<1+m; i++) {
-		val = x.dot(A[i]*x) + b[i].dot(x) + c[i];
-		prettyPrint("con = ", val);
+		obj = xOpt.dot(A[i]*xOpt) + b[i].dot(xOpt) + c[i];
+		prettyPrint("con = ", obj);
 	}
 
 }
