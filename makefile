@@ -11,3 +11,6 @@ all:
 
 debug:
 	$(CXX) $(DEBUGFLAGS) -o nl main.cpp $(LIBS)
+
+old:
+	$(CXX) $(CXXFLAGS) -fopenmp -o old old.cpp $(LIBS)
