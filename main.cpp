@@ -18,13 +18,15 @@ using namespace std::complex_literals;
 #include "fusion.h"
 
 // For printing
-int precision = 2;
+int precision = 3;
 
 // Convert from a std::vector of vectors to an Eigen array
 Eigen::MatrixXcd stdToEigen(std::vector<std::vector<std::complex<double>>> data) {
-	Eigen::MatrixXcd toReturn(data.size(), data[0].size());
+	Eigen::MatrixXcd toReturn = Eigen::MatrixXcd::Zero(data.size(), data[0].size());
 	for (int i=0; i<data.size(); i++) {
-		toReturn.row(i) = Eigen::VectorXcd::Map(&data[i][0], data[i].size());
+		for (int j=0; j<data[0].size(); j++) {
+			toReturn(i,j) = data[i][j];
+		}
 	}
 	return toReturn;
 }
@@ -197,7 +199,7 @@ int main(int argc, char ** argv) {
 	int numBMats = numMeasureB*(numOutcomeB-1);
 	int numMats = numRhoMats + numBMats;
 	int n = numMats*numUniquePer;
-	int m = 1 + numMats*(numUniquePer+1);
+	int m = 1 + numMats*2*(numRealPer+1);
 
 	// The value for MUBs
 	double criticalValue = -numPerm*d*d*(1+(1/std::sqrt(d)));
@@ -232,225 +234,141 @@ int main(int argc, char ** argv) {
 	for (int i=0; i<numMeasureB; i++) {
 		for (int j=i+1; j<numMeasureB; j++) {
 
-			// For each of the standard B_i
-			for (int k=0; k<numOutcomeB-1; k++) {
+			// For each of the B_i
+			for (int k=0; k<numOutcomeB; k++) {
 
-				// The location in the big matrix
-				int locBik = (numRhoMats + i*(numOutcomeB-1) + k)*numUniquePer;
+				// For each of the B_j
+				for (int l=0; l<numOutcomeB; l++) {
 
-				// For each of the standard B_j
-				for (int l=0; l<numOutcomeB-1; l++) {
-
-					// The location in the big matrix
-					int locBjl = (numRhoMats + j*(numOutcomeB-1) + l)*numUniquePer;
-
-					// rho * B^i_k
-					for (int a=0; a<numUniquePer; a++) {
-						tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, 2));
-						tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, 2));
-					}
-					for (int a=0; a<d-1; a++) {
-						for (int b=0; b<d-1; b++) {
-							if (a != b) {
-								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBik+diagLocs(b), 1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(b), locBik+diagLocs(a), 1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locRho+diagLocs(b), 1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(b), locRho+diagLocs(a), 1));
+					// rho * B^i_k TODO why is the imag not negative
+					if (k < numOutcomeB-1) {
+						int locBik = (numRhoMats + i*(numOutcomeB-1) + k)*numUniquePer;
+						for (int a=0; a<numUniquePer; a++) {
+							tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, 2));
+							tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, 2));
+						}
+						//for (int a=numRealPer; a<numUniquePer; a++) {
+							//tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, -2));
+							//tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, -2));
+						//}
+						for (int a=0; a<d-1; a++) {
+							for (int b=0; b<d-1; b++) {
+								if (a != b) {
+									tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBik+diagLocs(b), 1));
+									tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locRho+diagLocs(b), 1));
+								}
 							}
 						}
+						for (int a=0; a<d-1; a++) {
+							b[0](locRho+diagLocs(a)) += -1;
+							b[0](locBik+diagLocs(a)) += -1;
+						}
+						c[0] += 1;
+
+					// For rho * (1-B^i-...)
+					} else {
+						for (int k=0; k<numOutcomeB-1; k++) {
+							int locBik = (numRhoMats + i*(numOutcomeB-1) + k)*numUniquePer;
+							for (int a=0; a<numUniquePer; a++) {
+								tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, -2));
+								tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, -2));
+							}
+							//for (int a=numRealPer; a<numUniquePer; a++) {
+								//tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, 2));
+								//tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, 2));
+							//}
+							for (int a=0; a<d-1; a++) {
+								for (int b=0; b<d-1; b++) {
+									if (a != b) {
+										tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBik+diagLocs(b), -1));
+										tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locRho+diagLocs(b), -1));
+									}
+								}
+							}
+							for (int a=0; a<d-1; a++) {
+								b[0](locRho+diagLocs(a)) += 1;
+								b[0](locBik+diagLocs(a)) += 1;
+							}
+						}
+						c[0] += 2-d;
+
 					}
-					for (int a=0; a<d-1; a++) {
-						b[0](locRho+diagLocs(a)) += -1;
-						b[0](locBik+diagLocs(a)) += -1;
-					}
-					c[0] += 1;
 					
 					// rho * B^j_l
-					for (int a=0; a<numUniquePer; a++) {
-						tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, 2));
-						tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, 2));
-					}
-					for (int a=0; a<d-1; a++) {
-						for (int b=0; b<d-1; b++) {
-							if (a != b) {
-								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBjl+diagLocs(b), 1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(b), locBjl+diagLocs(a), 1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(a), locRho+diagLocs(b), 1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(b), locRho+diagLocs(a), 1));
+					if (l < numOutcomeB-1) {
+						int locBjl = (numRhoMats + j*(numOutcomeB-1) + l)*numUniquePer;
+						for (int a=0; a<numUniquePer; a++) {
+							tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, 2));
+							tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, 2));
+						}
+						//for (int a=numRealPer; a<numUniquePer; a++) {
+							//tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, -2));
+							//tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, -2));
+						//}
+						for (int a=0; a<d-1; a++) {
+							for (int b=0; b<d-1; b++) {
+								if (a != b) {
+									tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBjl+diagLocs(b), 1));
+									tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(a), locRho+diagLocs(b), 1));
+								}
 							}
 						}
+						for (int a=0; a<d-1; a++) {
+							b[0](locRho+diagLocs(a)) += -1;
+							b[0](locBjl+diagLocs(a)) += -1;
+						}
+						c[0] += 1;
+
+					// For rho * (1-B^j-...)
+					} else {
+						for (int l=0; l<numOutcomeB-1; l++) {
+							int locBjl = (numRhoMats + j*(numOutcomeB-1) + l)*numUniquePer;
+							for (int a=0; a<numUniquePer; a++) {
+								tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, -2));
+								tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, -2));
+							}
+							//for (int a=numRealPer; a<numUniquePer; a++) {
+								//tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, 2));
+								//tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, 2));
+							//}
+							for (int a=0; a<d-1; a++) {
+								for (int b=0; b<d-1; b++) {
+									if (a != b) {
+										tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBjl+diagLocs(b), -1));
+										tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(a), locRho+diagLocs(b), -1));
+									}
+								}
+							}
+							for (int a=0; a<d-1; a++) {
+								b[0](locRho+diagLocs(a)) += 1;
+								b[0](locBjl+diagLocs(a)) += 1;
+							}
+						}
+						c[0] += 2-d;
 					}
-					for (int a=0; a<d-1; a++) {
-						b[0](locRho+diagLocs(a)) += -1;
-						b[0](locBjl+diagLocs(a)) += -1;
-					}
-					c[0] += 1;
+
+					// Next rho
 					locRho += numUniquePer;
 
 				}
-
-				// rho * B^i_k
-				for (int a=0; a<numUniquePer; a++) {
-					tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, 2));
-					tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, 2));
-				}
-				for (int a=0; a<d-1; a++) {
-					for (int b=0; b<d-1; b++) {
-						if (a != b) {
-							tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBik+diagLocs(b), 1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(b), locBik+diagLocs(a), 1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locRho+diagLocs(b), 1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(b), locRho+diagLocs(a), 1));
-						}
-					}
-				}
-				for (int a=0; a<d-1; a++) {
-					b[0](locRho+diagLocs(a)) += -1;
-					b[0](locBik+diagLocs(a)) += -1;
-				}
-				c[0] += 1;
-					
-				// For 1-B^j...
-				for (int l=0; l<numOutcomeB-1; l++) {
-					int locBjl = (numRhoMats + j*(numOutcomeB-1) + l)*numUniquePer;
-					for (int a=0; a<numUniquePer; a++) {
-						tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, -2));
-						tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, -2));
-					}
-					for (int a=0; a<d-1; a++) {
-						for (int b=0; b<d-1; b++) {
-							if (a != b) {
-								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBjl+diagLocs(b), -1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(b), locBjl+diagLocs(a), -1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(a), locRho+diagLocs(b), -1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(b), locRho+diagLocs(a), -1));
-							}
-						}
-					}
-					for (int a=0; a<d-1; a++) {
-						b[0](locRho+diagLocs(a)) += 1;
-						b[0](locBjl+diagLocs(a)) += 1;
-					}
-				}
-				c[0] += 2-d;
-				locRho += numUniquePer;
-
+				
 			}
-
-			// For the 1-B^i-... outcome with the normal B^j
-			for (int l=0; l<numOutcomeB-1; l++) {
-				int locBjl = (numRhoMats + j*(numOutcomeB-1) + l)*numUniquePer;
-
-				// For 1-B^i...
-				for (int k=0; k<numOutcomeB-1; k++) {
-					int locBik = (numRhoMats + i*(numOutcomeB-1) + k)*numUniquePer;
-					for (int a=0; a<numUniquePer; a++) {
-						tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, -2));
-						tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, -2));
-					}
-					for (int a=0; a<d-1; a++) {
-						for (int b=0; b<d-1; b++) {
-							if (a != b) {
-								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBik+diagLocs(b), -1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(b), locBik+diagLocs(a), -1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locRho+diagLocs(b), -1));
-								tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(b), locRho+diagLocs(a), -1));
-							}
-						}
-					}
-					for (int a=0; a<d-1; a++) {
-						b[0](locRho+diagLocs(a)) += 1;
-						b[0](locBik+diagLocs(a)) += 1;
-					}
-				}
-				c[0] += 2-d;
-
-				// rho * B^j_l
-				for (int a=0; a<numUniquePer; a++) {
-					tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, 2));
-					tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, 2));
-				}
-				for (int a=0; a<d-1; a++) {
-					for (int b=0; b<d-1; b++) {
-						if (a != b) {
-							tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBjl+diagLocs(b), 1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(b), locBjl+diagLocs(a), 1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(a), locRho+diagLocs(b), 1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(b), locRho+diagLocs(a), 1));
-						}
-					}
-				}
-				for (int a=0; a<d-1; a++) {
-					b[0](locRho+diagLocs(a)) += -1;
-					b[0](locBjl+diagLocs(a)) += -1;
-				}
-				c[0] += 1;
-				locRho += numUniquePer;
-
-			}
-
-			// For the 1-B^i-... outcome with the 1-B^j-...
-			for (int k=0; k<numOutcomeB-1; k++) {
-				int locBik = (numRhoMats + i*(numOutcomeB-1) + k)*numUniquePer;
-				for (int a=0; a<numUniquePer; a++) {
-					tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, -2));
-					tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, -2));
-				}
-				for (int a=0; a<d-1; a++) {
-					for (int b=0; b<d-1; b++) {
-						if (a != b) {
-							tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBik+diagLocs(b), -1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(b), locBik+diagLocs(a), -1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locRho+diagLocs(b), -1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locBik+diagLocs(b), locRho+diagLocs(a), -1));
-						}
-					}
-				}
-				for (int a=0; a<d-1; a++) {
-					b[0](locRho+diagLocs(a)) += 1;
-					b[0](locBik+diagLocs(a)) += 1;
-				}
-			}
-			c[0] += 2-d;
-
-			// For 1-B^j...
-			for (int l=0; l<numOutcomeB-1; l++) {
-				int locBjl = (numRhoMats + j*(numOutcomeB-1) + l)*numUniquePer;
-				for (int a=0; a<numUniquePer; a++) {
-					tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, -2));
-					tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, -2));
-				}
-				for (int a=0; a<d-1; a++) {
-					for (int b=0; b<d-1; b++) {
-						if (a != b) {
-							tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(a), locBjl+diagLocs(b), -1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locRho+diagLocs(b), locBjl+diagLocs(a), -1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(a), locRho+diagLocs(b), -1));
-							tripsA_0.push_back(Eigen::Triplet<double>(locBjl+diagLocs(b), locRho+diagLocs(a), -1));
-						}
-					}
-				}
-				for (int a=0; a<d-1; a++) {
-					b[0](locRho+diagLocs(a)) += 1;
-					b[0](locBjl+diagLocs(a)) += 1;
-				}
-			}
-			c[0] += 2-d;
-			locRho += numUniquePer;
 
 		}
 	}
 
-	// Create the matrix and flip everything so it's a minimisation
+	// Create the matrix and 
 	A[0].setFromTriplets(tripsA_0.begin(), tripsA_0.end());
+
+	// TODO check d3n2
+	//prettyPrint("A_0 = ", A[0]);
+	//prettyPrint("b_0 = ", b[0]);
+	//prettyPrint("c_0 = ", c[0]);
+
+	// Flip everything so it's a minimisation
 	A[0] = -0.5*A[0];
 	b[0] = -1*b[0];
 	c[0] = -1*c[0];
-
-	// TODO check d3n2
-	prettyPrint("A_0 = ", A[0]);
-	prettyPrint("b_0 = ", b[0]);
-	prettyPrint("c_0 = ", c[0]);
 
 	// Create mapping from mat loc to real vec loc
 	Eigen::MatrixXi posToLocReal = Eigen::MatrixXi::Zero(d, d);
@@ -483,10 +401,10 @@ int main(int argc, char ** argv) {
 	for (int i=0; i<numMats; i++) {
 
 		// Every row 
-		for (int a1=0; a1<d-1; a1++) {
+		for (int a1=0; a1<d; a1++) {
 
 			// Times every column
-			for (int a2=a1; a2<d-1; a2++) {
+			for (int a2=a1; a2<d; a2++) {
 
 				// The vector of non-zero elements
 				std::vector<Eigen::Triplet<double>> tripsAReal;
@@ -546,7 +464,7 @@ int main(int argc, char ** argv) {
 						// Only a real part
 						c[nextInd] += 1;
 						for (int l=0; l<d-1; l++) {
-							b[nextInd](i*numUniquePer+posToLocReal(y1,x1)) -= 2;
+							b[nextInd](i*numUniquePer+posToLocReal(l,l)) -= 2;
 						}
 						for (int l1=0; l1<d-1; l1++) {
 							for (int l2=0; l2<d-1; l2++) {
@@ -583,13 +501,18 @@ int main(int argc, char ** argv) {
 				A[nextInd] = newAReal;
 				A[nextInd+1] = newAImag;
 
+				//A[nextInd] += Eigen::MatrixXd::Identity(n, n).sparseView();
+				//A[nextInd+1] += Eigen::MatrixXd::Identity(n, n).sparseView();
+				//c[nextInd] -= 3.5;
+				//c[nextInd+1] -= 3.5;
+
 				// TODO check d3n2
-				prettyPrint("A_i = ", A[nextInd]);
-				prettyPrint("b_i = ", b[nextInd]);
-				prettyPrint("c_i = ", c[nextInd]);
-				prettyPrint("A_i+1 = ", A[nextInd+1]);
-				prettyPrint("b_i+1 = ", b[nextInd+1]);
-				prettyPrint("c_i+1 = ", c[nextInd+1]);
+				//prettyPrint("A_i = ", A[nextInd]);
+				//prettyPrint("b_i = ", b[nextInd]);
+				//prettyPrint("c_i = ", c[nextInd]);
+				//prettyPrint("A_i+1 = ", A[nextInd+1]);
+				//prettyPrint("b_i+1 = ", b[nextInd+1]);
+				//prettyPrint("c_i+1 = ", c[nextInd+1]);
 
 				// We now have two more contraints
 				nextInd += 2;
@@ -599,6 +522,15 @@ int main(int argc, char ** argv) {
 		}
 
 	}
+
+	// Also need to add the identity-minus constraints TODO
+
+	prettyPrint("m = ", m);
+	prettyPrint("nextInd = ", nextInd);
+
+	// TODO x^Tx = ? constraint
+	//A[nextInd] += Eigen::MatrixXd::Identity(n, n).sparseView();
+	//c[nextInd] -= 3.5;
 
 	// Allow entry as the list of matrices
 	std::vector<std::vector<std::vector<std::complex<double>>>> Ms(numMeasureB*numOutcomeB);
@@ -644,24 +576,24 @@ int main(int argc, char ** argv) {
 		Ms[7] = { {  0.42+0.00i,  0.31-0.38i },
 				  {  0.31+0.38i,  0.58+0.00i } };
 	} else if (d == 3 && s == 2) {
-		Ms[0] = { { (+0.14489,+0.00000), (+0.30540,-0.13411), (-0.07569,-0.08316)},
-				  { (+0.30540,+0.13411), (+0.76785,+0.00000), (-0.08256,-0.24534)},
-				  { (-0.07569,+0.08316), (-0.08256,+0.24534), (+0.08727,+0.00000)} };
-		Ms[1] = { { (+0.55013,+0.00000), (-0.14651,+0.21867), (-0.27624,+0.31921)},
-				  { (-0.14651,-0.21867), (+0.12594,+0.00000), (+0.20045,+0.02479)},
-				  { (-0.27624,-0.31921), (+0.20045,-0.02479), (+0.32393,+0.00000)} };
-		Ms[2] = { { (+0.30498,+0.00000), (-0.15888,-0.08456), (+0.35192,-0.23605)},
-				  { (-0.15888,+0.08456), (+0.10622,+0.00000), (-0.11789,+0.22055)},
-				  { (+0.35192,+0.23605), (-0.11789,-0.22055), (+0.58880,+0.00000)} };
-		Ms[3] = { { (+0.06823,+0.00000), (+0.05579,+0.11727), (+0.20946,+0.05327)},
-				  { (+0.05579,-0.11727), (+0.24715,+0.00000), (+0.26282,-0.31644)},
-				  { (+0.20946,-0.05327), (+0.26282,+0.31644), (+0.68461,+0.00000)} };
-		Ms[4] = { { (+0.15982,+0.00000), (+0.04739,+0.28655), (-0.19954,-0.10053)},
-				  { (+0.04739,-0.28655), (+0.52782,+0.00000), (-0.23942,+0.32794)},
-				  { (-0.19954,+0.10053), (-0.23942,-0.32794), (+0.31236,+0.00000)} };
-		Ms[5] = { { (+0.77195,+0.00000), (-0.10318,-0.40381), (-0.00993,+0.04726)},
-				  { (-0.10318,+0.40381), (+0.22503,+0.00000), (-0.02339,-0.01151)},
-				  { (-0.00993,-0.04726), (-0.02339,+0.01151), (+0.00302,+0.00000)} };
+		Ms[0] = { { +0.14489+0.00000i, +0.30540-0.13411i, -0.07569-0.08316i},
+				  { +0.30540+0.13411i, +0.76785+0.00000i, -0.08256-0.24534i},
+				  { -0.07569+0.08316i, -0.08256+0.24534i, +0.08727+0.00000i} };
+		Ms[1] = { { +0.55013+0.00000i, -0.14651+0.21867i, -0.27624+0.31921i},
+				  { -0.14651-0.21867i, +0.12594+0.00000i, +0.20045+0.02479i},
+				  { -0.27624-0.31921i, +0.20045-0.02479i, +0.32393+0.00000i} };
+		Ms[2] = { { +0.30498+0.00000i, -0.15888-0.08456i, +0.35192-0.23605i},
+				  { -0.15888+0.08456i, +0.10622+0.00000i, -0.11789+0.22055i},
+				  { +0.35192+0.23605i, -0.11789-0.22055i, +0.58880+0.00000i} };
+		Ms[3] = { { +0.06823+0.00000i, +0.05579+0.11727i, +0.20946+0.05327i},
+				  { +0.05579-0.11727i, +0.24715+0.00000i, +0.26282-0.31644i},
+				  { +0.20946-0.05327i, +0.26282+0.31644i, +0.68461+0.00000i} };
+		Ms[4] = { { +0.15982+0.00000i, +0.04739+0.28655i, -0.19954-0.10053i},
+				  { +0.04739-0.28655i, +0.52782+0.00000i, -0.23942+0.32794i},
+				  { -0.19954+0.10053i, -0.23942-0.32794i, +0.31236+0.00000i} };
+		Ms[5] = { { +0.77195+0.00000i, -0.10318-0.40381i, -0.00993+0.04726i},
+				  { -0.10318+0.40381i, +0.22503+0.00000i, -0.02339-0.01151i},
+				  { -0.00993-0.04726i, -0.02339+0.01151i, +0.00302+0.00000i} };
 	} else if (d == 3 && s == 5) {
 		Ms[0] = {  {  0.50+0.00i, -0.25-0.40i,  0.11-0.12i },
 				   { -0.25+0.40i,  0.45+0.00i,  0.04+0.15i },
@@ -987,16 +919,15 @@ int main(int argc, char ** argv) {
 	}
 
 	// Test the ideal TODO d3n2
-	prettyPrint("x = ", xIdeal);
-	double innerBound = xIdeal.dot(A[0]*xIdeal) + b[0].dot(xIdeal) + c[0];
-	prettyPrint("obj = ", innerBound);
-	prettyPrint("crit = ", criticalValue);
 	for (int i=1; i<1+m; i++) {
 		double con = xIdeal.dot(A[i]*xIdeal) + b[i].dot(xIdeal) + c[i];
 		prettyPrint("con = ", con);
 	}
-
-	return 0;
+	prettyPrint("x = ", xIdeal);
+	prettyPrint("x^Tx = ", xIdeal.dot(xIdeal));
+	double innerBound = xIdeal.dot(A[0]*xIdeal) + b[0].dot(xIdeal) + c[0];
+	prettyPrint("obj = ", innerBound);
+	prettyPrint("crit = ", criticalValue);
 
 	// Turn the Eigen A matrices into MOSEK forms
 	std::vector<mosek::fusion::Matrix::t> AMosek(1+m);
@@ -1040,8 +971,8 @@ int main(int argc, char ** argv) {
 
 	// The moment matrix to optimise
 	auto dimX = monty::new_array_ptr(std::vector<int>({n, n}));
-	mosek::fusion::Variable::t X = model->variable(dimX, mosek::fusion::Domain::inRange(-1.0, 1.0));
-	mosek::fusion::Variable::t x = model->variable(n, mosek::fusion::Domain::inRange(-1.0, 1.0));
+	mosek::fusion::Variable::t X = model->variable(dimX, mosek::fusion::Domain::inRange(-2.0, 2.0));
+	mosek::fusion::Variable::t x = model->variable(n, mosek::fusion::Domain::inRange(-2.0, 2.0));
 
 	// Set up the objective function 
 	model->objective(mosek::fusion::ObjectiveSense::Minimize, mosek::fusion::Expr::add(mosek::fusion::Expr::dot(AMosek[0], X), mosek::fusion::Expr::dot(bMosek[0], x)));
