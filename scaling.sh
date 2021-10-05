@@ -5,7 +5,7 @@ initd=2
 finald=5
 
 # Number of repeats per
-repeats=3
+repeats=5
 
 # Clear the output file
 > scaling.dat
