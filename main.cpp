@@ -29,8 +29,8 @@ long int maxOuterIter =  1000000000;
 long int maxInnerIter =  1000000000;
 long int maxTotalInner = 1000000000;
 double muScaling = 10;
-double fScaling = 1.00;
-double gScaling = 1.00;
+double fScaling = 1;
+double gScaling = -1;
 double gThresh = 1e-15;
 int numCores = 1;
 bool useBFGS = true;
@@ -1651,6 +1651,9 @@ int main(int argc, char ** argv) {
 
 		// Make it an interior point
 		double v = 0;
+		if (gScaling == -1) {
+			gScaling = 0.1;
+		}
 		for (int i=0; i<10000000; i++) {
 			XZero = X(x, 0.0);
 			v = std::abs(g(XZero)(0) / gScaling);
@@ -1704,18 +1707,21 @@ int main(int argc, char ** argv) {
 
 	// Cache this in case we need to start again
 	Eigen::VectorXd oldx = x;
+	double gradScaling = 1;
+	double origScaling = gScaling;
 
 	// Keep trying descent until we find the largest step size that works
 	for (int j=0; j=100; j++) {
 
 		// Reset x
 		x = oldx;
+		gScaling = gradScaling;
 
 		// Gradient descent to make sure we start with an interior point
 		double v = 0;
 		for (int i=0; i<10000000; i++) {
 			XZero = X(x, 0.0);
-			v = std::abs(g(XZero)(0) / gScaling);
+			v = std::abs(g(XZero)(0) / gradScaling);
 			if (outputMode == "") {
 				std::cout << "g(x) = " << v << std::endl;
 			}
@@ -1734,8 +1740,15 @@ int main(int argc, char ** argv) {
 		if (outputMode == "") {
 			std::cout << "decreasing g factor from " << gScaling << " to " << gScaling / 1.5 << std::endl;
 		}
-		gScaling /= 1.5;
+		gradScaling /= 1.5;
 
+	}
+
+	// If gScaling wasn't manually set, then use the gradScaling
+	if (origScaling == -1) {
+		gScaling = gradScaling;
+	} else {
+		gScaling = origScaling;
 	}
 
 	// Get the full matrices from this
