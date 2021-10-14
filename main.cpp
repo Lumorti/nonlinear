@@ -122,6 +122,7 @@ void prettyPrint(std::string pre, Eigen::Matrix<type, -1, 1> arr) {
 	std::cout << std::noshowpos;
 
 }
+
 // Pretty print a general 2D dense Eigen array
 template <typename type>
 void prettyPrint(std::string pre, Eigen::Matrix<type, -1, -1> arr) {
