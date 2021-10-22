@@ -199,7 +199,7 @@ int main(int argc, char ** argv) {
 	int numBMats = numMeasureB*(numOutcomeB-1);
 	int numMats = numRhoMats + numBMats;
 	int n = numMats*numUniquePer;
-	int m = 1;
+	int m = 1 + numMats*2*(numRealPer+1);
 
 	// The value for MUBs
 	double criticalValue = -numPerm*d*d*(1+(1/std::sqrt(d)));
@@ -240,13 +240,17 @@ int main(int argc, char ** argv) {
 				// For each of the B_j
 				for (int l=0; l<numOutcomeB; l++) {
 
-					// rho * B^i_k
+					// rho * B^i_k TODO why is the imag not negative
 					if (k < numOutcomeB-1) {
 						int locBik = (numRhoMats + i*(numOutcomeB-1) + k)*numUniquePer;
 						for (int a=0; a<numUniquePer; a++) {
 							tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, 2));
 							tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, 2));
 						}
+						//for (int a=numRealPer; a<numUniquePer; a++) {
+							//tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, -2));
+							//tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, -2));
+						//}
 						for (int a=0; a<d-1; a++) {
 							for (int b=0; b<d-1; b++) {
 								if (a != b) {
@@ -269,6 +273,10 @@ int main(int argc, char ** argv) {
 								tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, -2));
 								tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, -2));
 							}
+							//for (int a=numRealPer; a<numUniquePer; a++) {
+								//tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBik+a, 2));
+								//tripsA_0.push_back(Eigen::Triplet<double>(locBik+a, locRho+a, 2));
+							//}
 							for (int a=0; a<d-1; a++) {
 								for (int b=0; b<d-1; b++) {
 									if (a != b) {
@@ -293,6 +301,10 @@ int main(int argc, char ** argv) {
 							tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, 2));
 							tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, 2));
 						}
+						//for (int a=numRealPer; a<numUniquePer; a++) {
+							//tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, -2));
+							//tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, -2));
+						//}
 						for (int a=0; a<d-1; a++) {
 							for (int b=0; b<d-1; b++) {
 								if (a != b) {
@@ -315,6 +327,10 @@ int main(int argc, char ** argv) {
 								tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, -2));
 								tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, -2));
 							}
+							//for (int a=numRealPer; a<numUniquePer; a++) {
+								//tripsA_0.push_back(Eigen::Triplet<double>(locRho+a, locBjl+a, 2));
+								//tripsA_0.push_back(Eigen::Triplet<double>(locBjl+a, locRho+a, 2));
+							//}
 							for (int a=0; a<d-1; a++) {
 								for (int b=0; b<d-1; b++) {
 									if (a != b) {
@@ -343,6 +359,11 @@ int main(int argc, char ** argv) {
 
 	// Create the matrix and 
 	A[0].setFromTriplets(tripsA_0.begin(), tripsA_0.end());
+
+	// TODO check d3n2
+	//prettyPrint("A_0 = ", A[0]);
+	//prettyPrint("b_0 = ", b[0]);
+	//prettyPrint("c_0 = ", c[0]);
 
 	// Flip everything so it's a minimisation
 	A[0] = -0.5*A[0];
@@ -375,26 +396,140 @@ int main(int argc, char ** argv) {
 		}
 	}
 
-	// Construct the contraint matrix, vector and constant TODO
-	std::vector<Eigen::Triplet<double>> tripsA_1;
-	for (int i=0; i<numRhoMats; i++) {
-		for (int j=0; j<numUniquePer; j++) {
-			tripsA_1.push_back(Eigen::Triplet<double>(i*numUniquePer+j, i*numUniquePer+j, 4));
-		}
-	}
-	for (int i=0; i<numBMats; i++) {
-		for (int j=0; j<numUniquePer; j++) {
-			tripsA_1.push_back(Eigen::Triplet<double>((numRhoMats+i)*numUniquePer+j, (numRhoMats+i)*numUniquePer+j, 8));
-		}
-	}
-	A[1].setFromTriplets(tripsA_1.begin(), tripsA_1.end());
-	for (int i=0; i<numRhoMats; i++) {
-		b[1][i*numUniquePer] = -4;
-	}
-	for (int i=0; i<numBMats; i++) {
-		b[1][(numRhoMats+i)*numUniquePer] = -8;
-	}
-	c[1] = (double(1-2*d*numMats) / double(4*numMats*numMats));
+	// Create the constraint matrices and vectors
+	//int nextInd = 1;
+	//for (int i=0; i<numMats; i++) {
+
+		//// Every row 
+		//for (int a1=0; a1<d; a1++) {
+
+			//// Times every column
+			//for (int a2=a1; a2<d; a2++) {
+
+				//// The vector of non-zero elements
+				//std::vector<Eigen::Triplet<double>> tripsAReal;
+				//std::vector<Eigen::Triplet<double>> tripsAImag;
+
+				//// Each pair within this multiplication
+				//int x1 = 0;
+				//int y1 = a1;
+				//int x2 = a2;
+				//int y2 = 0;
+				//for (int j=0; j<d; j++) {
+
+					//// If it's two originals (a+ib)(c+id) = ac-bd + i(bc+da)
+					//if (posToLocReal(y1,x1) != diagTerm && posToLocReal(y2,x2) != diagTerm) {
+
+						//// The real part
+						//tripsAReal.push_back(Eigen::Triplet<double>(i*numUniquePer+posToLocReal(y1,x1), i*numUniquePer+posToLocReal(y2,x2), 1));
+						//tripsAReal.push_back(Eigen::Triplet<double>(i*numUniquePer+posToLocImag(y1,x1), i*numUniquePer+posToLocImag(y2,x2), -imagSigns(y1,x1)*imagSigns(y2,x2)));
+
+						//// The imag part
+						//tripsAImag.push_back(Eigen::Triplet<double>(i*numUniquePer+posToLocReal(y1,x1), i*numUniquePer+posToLocImag(y2,x2), imagSigns(y2,x2)));
+						//tripsAImag.push_back(Eigen::Triplet<double>(i*numUniquePer+posToLocImag(y1,x1), i*numUniquePer+posToLocReal(y2,x2), imagSigns(y1,x1)));
+
+					//// If it's an original and a one-minus (a+ib)(1-c-d-...) = (a-ac-ad-...) + i(b-bc-bd-...)
+					//} else if (posToLocReal(y1,x1) != diagTerm && posToLocReal(y2,x2) == diagTerm) {
+
+						//// The real part
+						//b[nextInd](i*numUniquePer+posToLocReal(y1,x1)) += 1;
+						//for (int l=0; l<d-1; l++) {
+							//tripsAReal.push_back(Eigen::Triplet<double>(i*numUniquePer+posToLocReal(y1,x1), i*numUniquePer+posToLocReal(l,l), -1));
+						//}
+
+						//// The imag part
+						//b[nextInd+1](i*numUniquePer+posToLocImag(y1,x1)) += 1;
+						//for (int l=0; l<d-1; l++) {
+							//tripsAImag.push_back(Eigen::Triplet<double>(i*numUniquePer+posToLocImag(y1,x1), i*numUniquePer+posToLocReal(l,l), -imagSigns(y1,x1)));
+						//}
+
+					//// If it's a one-minus and an original (1-c-d-...)(a+ib) = (a-ac-ad-...) + i(b-bc-bd-...)
+					//} else if (posToLocReal(y1,x1) == diagTerm && posToLocReal(y2,x2) != diagTerm) {
+
+						//// The real part
+						//b[nextInd](i*numUniquePer+posToLocReal(y2,x2)) += 1;
+						//for (int l=0; l<d-1; l++) {
+							//tripsAReal.push_back(Eigen::Triplet<double>(i*numUniquePer+posToLocReal(y2,x2), i*numUniquePer+posToLocReal(l,l), -1));
+						//}
+
+						//// The imag part
+						//b[nextInd+1](i*numUniquePer+posToLocImag(y2,x2)) += 1;
+						//for (int l=0; l<d-1; l++) {
+							//tripsAImag.push_back(Eigen::Triplet<double>(i*numUniquePer+posToLocImag(y2,x2), i*numUniquePer+posToLocReal(l,l), -imagSigns(y2,x2)));
+						//}
+
+					//// If it's two one-minus (1-a-g-...)(1-c-e-...) = 1-a-g-c-e-...+ac+ae+gc+ge+...
+					//} else if (posToLocReal(y1,x1) == diagTerm && posToLocReal(y2,x2) == diagTerm) {
+
+						//// Only a real part
+						//c[nextInd] += 1;
+						//for (int l=0; l<d-1; l++) {
+							//b[nextInd](i*numUniquePer+posToLocReal(l,l)) -= 2;
+						//}
+						//for (int l1=0; l1<d-1; l1++) {
+							//for (int l2=0; l2<d-1; l2++) {
+								//tripsAReal.push_back(Eigen::Triplet<double>(i*numUniquePer+posToLocReal(l1,l1), i*numUniquePer+posToLocReal(l2,l2), 1));
+							//}
+						//}
+
+					//}
+
+					//// Next element
+					//x1 += 1;
+					//y2 += 1;
+
+				//}
+
+				//// Subtract just the real linear term if it's a one-minus
+				//if (posToLocReal(a1,a2) == diagTerm) {
+					//for (int l=0; l<d-1; l++) {
+						//b[nextInd](i*numUniquePer+posToLocReal(l,l)) += 1;
+					//}
+					//c[nextInd] -= 1;
+
+				//// Otherwise subtract both
+				//} else {
+					//b[nextInd](i*numUniquePer+posToLocReal(a1,a2)) -= 1;
+					//b[nextInd+1](i*numUniquePer+posToLocImag(a1,a2)) -= imagSigns(a1, a2);
+				//}
+
+				//// Construct the A matrices
+				//Eigen::SparseMatrix<double> newAReal(n, n);
+				//Eigen::SparseMatrix<double> newAImag(n, n);
+				//newAReal.setFromTriplets(tripsAReal.begin(), tripsAReal.end());
+				//newAImag.setFromTriplets(tripsAImag.begin(), tripsAImag.end());
+				//A[nextInd] = newAReal;
+				//A[nextInd+1] = newAImag;
+
+				////A[nextInd] += Eigen::MatrixXd::Identity(n, n).sparseView();
+				////A[nextInd+1] += Eigen::MatrixXd::Identity(n, n).sparseView();
+				////c[nextInd] -= 3.5;
+				////c[nextInd+1] -= 3.5;
+
+				//// TODO check d3n2
+				////prettyPrint("A_i = ", A[nextInd]);
+				////prettyPrint("b_i = ", b[nextInd]);
+				////prettyPrint("c_i = ", c[nextInd]);
+				////prettyPrint("A_i+1 = ", A[nextInd+1]);
+				////prettyPrint("b_i+1 = ", b[nextInd+1]);
+				////prettyPrint("c_i+1 = ", c[nextInd+1]);
+
+				//// We now have two more contraints
+				//nextInd += 2;
+
+			//}
+
+		//}
+
+	//}
+
+	// Also need to add the identity-minus constraints TODO
+	//prettyPrint("m = ", m);
+	//prettyPrint("nextInd = ", nextInd);
+
+	// TODO x^Tx = ? constraint
+	//A[nextInd] += Eigen::MatrixXd::Identity(n, n).sparseView();
+	//c[nextInd] -= 3.5;
 
 	// Allow entry as the list of matrices
 	std::vector<std::vector<std::vector<std::complex<double>>>> Ms(numMeasureB*numOutcomeB);
@@ -782,18 +917,12 @@ int main(int argc, char ** argv) {
 		}
 	}
 
-	// Test the ideal TODO
+	// Test the ideal TODO d3n2
+	for (int i=1; i<1+m; i++) {
+		double con = xIdeal.dot(A[i]*xIdeal) + b[i].dot(xIdeal) + c[i];
+		prettyPrint("con of known = ", con);
+	}
 	double innerBound = xIdeal.dot(A[0]*xIdeal) + b[0].dot(xIdeal) + c[0];
-	double con = xIdeal.dot(A[1]*xIdeal) + b[1].dot(xIdeal) + c[1];
-	std::cout << xIdeal.dot(A[1]*xIdeal) << " " << b[1].dot(xIdeal) << " " << c[1] << std::endl;
-	prettyPrint("x = ", xIdeal);
-	prettyPrint("A_0 = ", A[0]);
-	prettyPrint("b_0 = ", b[0]);
-	prettyPrint("c_0 = ", c[0]);
-	prettyPrint("A_1 = ", A[1]);
-	prettyPrint("b_1 = ", b[1]);
-	prettyPrint("c_1 = ", c[1]);
-	prettyPrint("con of known = ", con);
 	prettyPrint("obj of known = ", innerBound);
 
 	// Turn the Eigen A matrices into MOSEK forms
