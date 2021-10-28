@@ -236,12 +236,18 @@ int main(int argc, char ** argv) {
 	b[0] = -1*b[0];
 	c[0] = -1*c[0];
 
+	// The list of non-diagonal indices
+	std::vector<int> nondiagLocs;
+
 	// Create mapping from mat loc to real vec loc
 	Eigen::MatrixXi posToLocReal = Eigen::MatrixXi::Zero(d, d);
 	int nextLoc = 0;
 	int diagTerm = numUniquePer*10;
 	for (int b=0; b<d-1; b++) {
 		for (int a=b; a<d; a++) {
+			if (a != b) {
+				nondiagLocs.push_back(nextLoc);
+			}
 			posToLocReal(b, a) = nextLoc;
 			posToLocReal(a, b) = nextLoc;
 			nextLoc += 1;
@@ -254,6 +260,9 @@ int main(int argc, char ** argv) {
 	Eigen::MatrixXi imagSigns = Eigen::MatrixXi::Zero(d, d);
 	for (int b=0; b<d-1; b++) {
 		for (int a=b+1; a<d; a++) {
+			if (a != b) {
+				nondiagLocs.push_back(nextLoc);
+			}
 			posToLocImag(b, a) = nextLoc;
 			posToLocImag(a, b) = nextLoc;
 			imagSigns(b, a) = 1;
@@ -264,6 +273,8 @@ int main(int argc, char ** argv) {
 
 	// Construct the constraint matrix
 	std::vector<Eigen::Triplet<double>> tripsA_1;
+
+	// For the B's
 	for (int i=0; i<numMeasureB; i++) {
 
 		// For each of the B_i
@@ -271,10 +282,16 @@ int main(int argc, char ** argv) {
 
 			// B^i_k * B^i_k
 			if (k < numOutcomeB-1) {
+
+				// The location in the big matrix
 				int locBik = (numRhoMats + i*(numOutcomeB-1) + k)*numUniquePer;
+
+				// 2's for all square terms
 				for (int a=0; a<numUniquePer; a++) {
 					tripsA_1.push_back(Eigen::Triplet<double>(locBik+a, locBik+a, 2));
 				}
+
+				// Then the mixed terms
 				for (int a=0; a<d-1; a++) {
 					for (int b=0; b<d-1; b++) {
 						if (a != b) {
@@ -282,56 +299,92 @@ int main(int argc, char ** argv) {
 						}
 					}
 				}
+
+				// The linear term
 				for (int a=0; a<d-1; a++) {
 					b[1](locBik+diagLocs(a)) -= 2;
 				}
+
+				// The constant term
 				c[1] += 1;
 
 			// For (1-B^i-...) * (1-B^i-...) TODO
 			} else {
+
+				// For each of the other B matrices
+				for (int k=0; k<numOutcomeB-1; k++) {
+					for (int l=0; l<numOutcomeB-1; l++) {
+
+						// The locations in the big matrix
+						int locBik = (numRhoMats + i*(numOutcomeB-1) + k)*numUniquePer;
+						int locBil = (numRhoMats + i*(numOutcomeB-1) + l)*numUniquePer;
+
+						// If it's the block diagonal
+						if (k == l) {
+
+							// 2's for all square terms
+							for (int a=0; a<numUniquePer; a++) {
+								tripsA_1.push_back(Eigen::Triplet<double>(locBik+a, locBik+a, 2));
+							}
+
+							// Then the mixed terms
+							for (int a=0; a<d-1; a++) {
+								for (int b=0; b<d-1; b++) {
+									if (a != b) {
+										tripsA_1.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locBik+diagLocs(b), 1));
+									}
+								}
+							}
+
+						// If it's B1 to B2 etc.
+						} else {
+
+							// 2's for only the non-diagonal square terms
+							for (int a=0; a<numUniquePer; a++) {
+								tripsA_1.push_back(Eigen::Triplet<double>(locBik+a, locBil+a, 2));
+							}
+
+							// Then the mixed terms
+							for (int a=0; a<d-1; a++) {
+								for (int b=0; b<d-1; b++) {
+									if (a != b) {
+										tripsA_1.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locBil+diagLocs(b), 1));
+									}
+								}
+							}
+
+						}
+
+					}
+				}
+
+				// The linear term
 				for (int k=0; k<numOutcomeB-1; k++) {
 					int locBik = (numRhoMats + i*(numOutcomeB-1) + k)*numUniquePer;
-					for (int a=0; a<numUniquePer; a++) {
-						tripsA_1.push_back(Eigen::Triplet<double>(locBik+a, locBik+a, 2));
-					}
 					for (int a=0; a<d-1; a++) {
-						for (int b=0; b<d-1; b++) {
-							if (a != b) {
-								tripsA_1.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locBik+diagLocs(b), 1));
-							}
-						}
+						b[1](locBik+diagLocs(a)) += -2+2*(2-d);
 					}
-					for (int a=0; a<d-1; a++) {
-						//b[1](locBik+diagLocs(a)) -= 2+2*(2-d);
-						b[1](locBik+diagLocs(a)) -= 2;
-					}
-					//for (int l=0; l<numOutcomeB-1; l++) {
-						//if (k != l) {
-							//int locOther = (numRhoMats + i*(numOutcomeB-1) + l)*numUniquePer;
-							//for (int a=0; a<d-1; a++) {
-								//for (int b=0; b<d-1; b++) {
-									//if (a != b) {
-										//tripsA_1.push_back(Eigen::Triplet<double>(locOther+diagLocs(a), locBik+diagLocs(b), 1));
-										//tripsA_1.push_back(Eigen::Triplet<double>(locBik+diagLocs(a), locOther+diagLocs(b), 1));
-									//}
-								//}
-							//}
-						//}
-					//}
 				}
-				//c[1] += d-1+std::pow(2-d, 2);
-				c[1] += 1;
+
+				// The constant term
+				c[1] += d-1 + std::pow(2-d, 2);
 
 			}
 
 		}
 
 	}
+
+	// For the rho's
 	for (int i=0; i<numRhoMats; i++) {
 		int locBik = i*numUniquePer;
+
+		// 2's for all square terms
 		for (int a=0; a<numUniquePer; a++) {
 			tripsA_1.push_back(Eigen::Triplet<double>(locBik+a, locBik+a, 2));
 		}
+
+		// Then the mixed terms
 		for (int a=0; a<d-1; a++) {
 			for (int b=0; b<d-1; b++) {
 				if (a != b) {
@@ -339,13 +392,25 @@ int main(int argc, char ** argv) {
 				}
 			}
 		}
+
+		// The linear term
 		for (int a=0; a<d-1; a++) {
 			b[1](locBik+diagLocs(a)) -= 2;
 		}
+
+		// The constant term
 		c[1] += 1;
+
 	}
+
+	// Construct the matrix
 	A[1].setFromTriplets(tripsA_1.begin(), tripsA_1.end());
 	c[1] -= N;
+
+	// Double everything
+	A[1] *= 2;
+	b[1] *= 2;
+	c[1] *= 2;
 
 	// Get the known results from the seesaw
 	std::vector<std::vector<std::vector<std::complex<double>>>> Ms = getKnown(d, s);
@@ -403,6 +468,7 @@ int main(int argc, char ** argv) {
 		}
 	}
 
+	// Put this into a big full matrix
 	for (int i=0; i<numMeasureB; i++) {
 		for (int k=0; k<numOutcomeB; k++) {
 			int ind1 = i*numOutcomeB + k;
@@ -440,19 +506,41 @@ int main(int argc, char ** argv) {
 	std::cout << xIdeal.dot(A[1]*xIdeal) << " " << b[1].dot(xIdeal) << " " << c[1] << std::endl;
 	prettyPrint("x = ", xIdeal);
 	prettyPrint("M = ", MIdeal);
-	prettyPrint("tr(M) = ", MIdeal.trace());
-	prettyPrint("tr(M^2) = ", (MIdeal*MIdeal).trace());
-	prettyPrint("eigenvalues(M) = ", MIdeal.eigenvalues());
-	prettyPrint("deter(M) = ", MIdeal.determinant());
-	prettyPrint("2*d*N-1 = ", 2*d*N-1);
 	prettyPrint("A_0 = ", A[0]);
 	prettyPrint("b_0 = ", b[0]);
 	prettyPrint("c_0 = ", c[0]);
 	prettyPrint("A_1 = ", A[1]);
 	prettyPrint("b_1 = ", b[1]);
 	prettyPrint("c_1 = ", c[1]);
-	prettyPrint("con of known = ", con);
-	prettyPrint("obj of known = ", innerBound);
+
+	// TODO this doesn't work
+	//int startExtract = 0;
+	//int endExtract = 4;
+	//int startExtract = numRhoMats+2;
+	//int endExtract = numRhoMats+2+2;
+	//int startExtractM = numRhoMats+3;
+	//int endExtractM = numRhoMats+3+3;
+	//Eigen::MatrixXd MFirst = MIdeal.block(startExtractM*2*d, startExtractM*2*d, (endExtractM-startExtractM)*2*d, (endExtractM-startExtractM)*2*d);
+	//Eigen::VectorXd xFirst = xIdeal.segment(startExtract*numUniquePer, (endExtract-startExtract)*numUniquePer);
+	//Eigen::MatrixXd AFirst = A[1].block(startExtract*numUniquePer, startExtract*numUniquePer, (endExtract-startExtract)*numUniquePer, (endExtract-startExtract)*numUniquePer);
+	//Eigen::VectorXd bFirst = b[1].segment(startExtract*numUniquePer, (endExtract-startExtract)*numUniquePer);
+	//double cFirst = 0;
+	//cFirst += 1;
+	//cFirst += 1;
+	//cFirst += d-1 + std::pow(2-d, 2);
+	//cFirst *= 2;
+	//prettyPrint("M = ", MFirst);
+	//prettyPrint("x = ", xFirst);
+	//prettyPrint("A = ", AFirst);
+	//prettyPrint("b = ", bFirst);
+	//prettyPrint("c = ", cFirst);
+	//prettyPrint("tr(M^2) = ", MFirst.cwiseProduct(MFirst).sum());
+	//prettyPrint("A*x+b*x+c = ", xFirst.dot(AFirst*xFirst) + bFirst.dot(xFirst) + cFirst);
+	//std::cout << "" << std::endl;
+	//prettyPrint("tr(M) = ", MIdeal.trace());
+	//prettyPrint("tr(M^2) = ", MIdeal.cwiseProduct(MIdeal).sum());
+	//prettyPrint("con of known = ", con);
+	//prettyPrint("obj of known = ", innerBound);
 
 	// Turn the Eigen A matrices into MOSEK forms
 	std::vector<mosek::fusion::Matrix::t> AMosek(1+m);
