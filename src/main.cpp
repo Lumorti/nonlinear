@@ -30,8 +30,8 @@ long int maxInnerIter =  1000000000;
 long int maxTotalInner = 1000000000;
 double muScaling = 10;
 double fScaling = 1;
-double gScaling = -1;
-double gThresh = 1e-15;
+double gScaling = 1;
+double gThresh = 1e-10;
 int numCores = 1;
 bool useBFGS = true;
 double BFGSmaxG = 0.1;
@@ -40,15 +40,15 @@ double BFGSmaxG = 0.1;
 double gammaVal = 0.9;
 double epsilonZero = 0.9;
 double beta = 0.1;
+double nu = 0.9;
+double rho = 0.5;
 
 // Parameters greater than 0
 double epsilon = 1e-5; 
 double M_c = 1e10;
 double mu = 1.0;
-double nu = 0.9;
-double rho = 0.5;
 
-// Useful quantities
+// Useful global quantities
 int numPerm = 0;
 int numMeasureB = 0;
 int numOutcomeB = 0;
@@ -287,7 +287,7 @@ Eigen::SparseMatrix<double> X(Eigen::VectorXd x, double extra=extraDiag) {
 	// Add the B
 	newX += B;
 
-	// Add a bit extra to make it reversible
+	// Add a bit extra to make it invertible
 	newX += Eigen::MatrixXd::Identity(p, p).sparseView() * extra;
 	
 	// Return this new matrix
@@ -677,8 +677,6 @@ Eigen::VectorXd g(Eigen::SparseMatrix<double> XZero) {
 
 	// Force the measurement to be projective
 	gOutput(0) = (XZero*XZero - XZero).squaredNorm();
-	//gOutput(0) = trace(XZero*XZero - XZero);
-	//gOutput(0) = trace(XZero - XZero*XZero);
 
 	// Return this vector of things that should be zero
 	return gScaling*gOutput;
@@ -698,7 +696,6 @@ Eigen::MatrixXd delg(Eigen::SparseMatrix<double> XZero) {
     #pragma omp parallel for
 	for (int i=0; i<n; i++) {
 		gOutput(0, i) = 2*GCached.cwiseProduct(2*As[i]*XZero - As[i]).sum();
-		//gOutput(0, i) = trace(As[i] - 2*As[i]*XZero);
 	}
 
 	// Return the gradient vector of g
@@ -721,7 +718,6 @@ Eigen::MatrixXd del2g(Eigen::SparseMatrix<double> XZero) {
 		Eigen::SparseMatrix<double> AsiXZero = 2*As[i]*XZero - As[i];
 		for (int j=0; j<n; j++) {
 			gOutput(i, j) = 2*((2*As[j]*XZero - As[j]).cwiseProduct(AsiXZero).sum()) + 4*(GCached.cwiseProduct(As[i]*As[j]).sum());
-			//gOutput(i, j) = trace(2*As[i]*As[j]);
 		}
 	}
 
@@ -1073,6 +1069,9 @@ int main(int argc, char ** argv) {
 	p = numMeasureB*numOutcomeB*d*2;
 	halfP = p / 2;
 
+	// The "ideal" value
+	double maxVal = fScaling*numPerm*d*std::sqrt(d*(d-1));
+
 	// Output various bits of info about the problem/parameters
 	if (outputMode == "") {
 		std::cout << "--------------------------------" << std::endl;
@@ -1082,6 +1081,7 @@ int main(int argc, char ** argv) {
 		std::cout << "               n = " << sets << std::endl;
 		std::cout << "  size of vector = " << n << std::endl;
 		std::cout << "  size of matrix = " << p << " x " << p << " ~ " << p*p*16 / (1024*1024) << " MB " << std::endl;
+		std::cout << "     ideal value = " << maxVal << std::endl;
 		std::cout << "         epsilon = " << epsilon << std::endl;
 		std::cout << "       epsilon_0 = " << epsilonZero << std::endl;
 		std::cout << "     g(x) thresh = " << gThresh << std::endl;
@@ -1098,9 +1098,6 @@ int main(int argc, char ** argv) {
 		std::cout << "           cores = " << numCores << std::endl;
 		std::cout << "" << std::endl;
 	}
-
-	// The "ideal" value
-	double maxVal = fScaling*numPerm*d*std::sqrt(d*(d-1));
 
 	// Calculate the A matrices uses to turn X to x
 	for (int i=0; i<numMeasureB; i++) {
@@ -1172,9 +1169,6 @@ int main(int argc, char ** argv) {
 			nextX = 1;
 			nextY = 0;
 			for (int l=0; l<numImagPer; l++) {
-
-				// Create a blank p by p matrix
-				//Eigen::MatrixXd newAImag = Eigen::MatrixXd::Zero(p, p);
 
 				// Create a blank p by p matrix
 				Eigen::SparseMatrix<double> newAImag(p, p);
@@ -1268,7 +1262,7 @@ int main(int argc, char ** argv) {
 		srand((unsigned int) time(0));
 	}
 
-	// If starting with a random matrix (seeded or not)
+	// If starting with a random matrix (seeded or not) 
 	if (initMode == "random" || initMode == "fixed") {
 
 		// Start with a bunch of projective measurements
@@ -1284,7 +1278,9 @@ int main(int argc, char ** argv) {
 				// Copy it to the big matrix
 				int ind = (i*numOutcomeB + j) * d;
 				XDense.block(ind, ind, d, d) = tempMat.real();
+				XDense.block(ind+halfP, ind+halfP, d, d) = tempMat.real();
 				XDense.block(ind, ind+halfP, d, d) = tempMat.imag();
+				XDense.block(ind+halfP, ind, d, d) = tempMat.imag();
 
 			}
 		}
@@ -1706,7 +1702,7 @@ int main(int argc, char ** argv) {
 
 	}
 
-	// Cache this in case we need to start again
+	// Save the current x and gScaling values
 	Eigen::VectorXd oldx = x;
 	double gradScaling = 1;
 	double origScaling = gScaling;
@@ -1741,7 +1737,7 @@ int main(int argc, char ** argv) {
 		if (outputMode == "") {
 			std::cout << "decreasing g factor from " << gScaling << " to " << gScaling / 1.5 << std::endl;
 		}
-		gradScaling /= 1.5;
+		gradScaling /= 1.2;
 
 	}
 
@@ -1811,22 +1807,22 @@ int main(int argc, char ** argv) {
 	}
 
 	// Output the initial Z
-	//if (outputMode == "") {
-		//std::cout << "" << std::endl;
-		//std::cout << "--------------------------------" << std::endl;
-		//std::cout << "      Initial Z " << std::endl;;
-		//std::cout << "--------------------------------" << std::endl;
-		//for (int i=0; i<numMeasureB; i++) {
-			//for (int j=0; j<numOutcomeB; j++) {
-				//int ind = (i*numOutcomeB + j)*d;
-				//Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
-				//std::cout << std::endl;
-				//prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
-			//}
-		//}
-		//std::cout << std::endl;
-		//prettyPrint("X dot Z = ", XCached.cwiseProduct(Z).sum());
-	//}
+	if (outputMode == "") {
+		std::cout << "" << std::endl;
+		std::cout << "--------------------------------" << std::endl;
+		std::cout << "      Initial Z " << std::endl;;
+		std::cout << "--------------------------------" << std::endl;
+		for (int i=0; i<numMeasureB; i++) {
+			for (int j=0; j<numOutcomeB; j++) {
+				int ind = (i*numOutcomeB + j)*d;
+				Eigen::MatrixXcd M = Z.block(ind, ind, d, d) + 1i*Z.block(ind+halfP, ind, d, d);
+				std::cout << std::endl;
+				prettyPrint("Z_" + std::to_string(j) + "^" + std::to_string(i) + " = ", M);
+			}
+		}
+		std::cout << std::endl;
+		prettyPrint("X dot Z = ", XCached.cwiseProduct(Z).sum());
+	}
 
 	// Init some thing that are used for the first calcs
 	Eigen::SparseMatrix<double> XInverse = XDense.inverse().sparseView();
@@ -1950,7 +1946,8 @@ int main(int argc, char ** argv) {
 			leftMat.block(0,n,n,m) = -A_0.transpose();
 			rightVec.head(n) = -delfCached + A_0.transpose()*y + mu*AStarXInverse;
 			rightVec.tail(m) = gCached;
-			solution = leftMat.colPivHouseholderQr().solve(rightVec);
+			//solution = leftMat.ldlt().solve(rightVec);
+			solution = leftMat.householderQr().solve(rightVec); // TODO try different
 			deltax = solution.head(n);
 			deltay = solution.tail(m);
 
