@@ -35,6 +35,7 @@ double gThresh = 1e-10;
 int numCores = 1;
 bool useBFGS = true;
 double BFGSmaxG = 0.1;
+bool experimental = false;
 
 // Parameters between 0 and 1
 double gammaVal = 0.9;
@@ -878,6 +879,7 @@ int main(int argc, char ** argv) {
 			std::cout << " -n [int]         set the number of measurements" << std::endl;
 			std::cout << " -c [int]         set how many cores to use" << std::endl;
 			std::cout << " -V [int] [int]   visualise the search space" << std::endl;
+			std::cout << " -x               use experimental features" << std::endl;
 			std::cout << "                        " << std::endl;
 			std::cout << "       output options          " << std::endl;
 			std::cout << " -p [int]         set the precision" << std::endl;
@@ -910,6 +912,10 @@ int main(int argc, char ** argv) {
 			std::cout << " -t [int]         set total inner iteration limit" << std::endl;
 			std::cout << "" << std::endl;
 			return 0;
+
+		// If told to use experimental features
+		} else if (arg == "-x") {
+			experimental = true;
 
 		// Set the number of measurements 
 		} else if (arg == "-d") {
@@ -1947,7 +1953,11 @@ int main(int argc, char ** argv) {
 			rightVec.head(n) = -delfCached + A_0.transpose()*y + mu*AStarXInverse;
 			rightVec.tail(m) = gCached;
 			//solution = leftMat.ldlt().solve(rightVec);
-			solution = leftMat.householderQr().solve(rightVec); // TODO try different
+			if (experimental) {
+				solution = leftMat.householderQr().solve(rightVec); // TODO try different
+			} else {
+				solution = leftMat.colPivHouseholderQr().solve(rightVec); // TODO try different
+			}
 			deltax = solution.head(n);
 			deltay = solution.tail(m);
 
