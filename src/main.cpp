@@ -810,14 +810,8 @@ double deltaF(Eigen::MatrixXd deltaZ, Eigen::SparseMatrix<double> ZInverse, Eige
 bool isPD(Eigen::MatrixXd G) {
 	return G.llt().info() != Eigen::NumericalIssue;
 }
-bool isPSD(Eigen::MatrixXd G) {
-	return (G+(1e-13)*Eigen::MatrixXd::Identity(G.cols(), G.rows())).llt().info() != Eigen::NumericalIssue;
-}
 bool isComplexPD(Eigen::MatrixXcd G) {
 	return G.llt().info() != Eigen::NumericalIssue;
-}
-bool isComplexPSD(Eigen::MatrixXcd G) {
-	return (G+(1e-13)*Eigen::MatrixXcd::Identity(G.cols(), G.rows())).llt().info() != Eigen::NumericalIssue;
 }
 
 // Given a matrix, make it be positive definite
@@ -1786,7 +1780,6 @@ int main(int argc, char ** argv) {
 		std::cout << "|X^2-X|  = " << (XZero*XZero - XZero).squaredNorm() << std::endl;
 		std::cout << "tr(X^2-X)  = " << trace(XZero*XZero - XZero) << std::endl;
 		std::cout << "isPD(X) = " << isPD(XZero) << std::endl;
-		std::cout << "isPSD(X) = " << isPSD(XZero) << std::endl;
 	}
 
 	// Ensure this is an interior point
@@ -1952,9 +1945,9 @@ int main(int argc, char ** argv) {
 			leftMat.block(0,n,n,m) = -A_0.transpose();
 			rightVec.head(n) = -delfCached + A_0.transpose()*y + mu*AStarXInverse;
 			rightVec.tail(m) = gCached;
-			//solution = leftMat.ldlt().solve(rightVec);
 			if (experimental) {
-				solution = leftMat.householderQr().solve(rightVec); // TODO try different
+				Eigen::BiCGSTAB<Eigen::MatrixXd> solver(leftMat);
+				solution = solver.solve(rightVec);
 			} else {
 				solution = leftMat.colPivHouseholderQr().solve(rightVec); // TODO try different
 			}
